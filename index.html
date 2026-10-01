@@ -236,6 +236,7 @@ button{cursor:pointer}
 .fld .wrap.newf.on{display:flex}
 .busy{opacity:.55;pointer-events:none}
 .ctrl-note{font-size:11.5px;color:var(--text-4)}
+.bill.askrule .remember{display:flex}   /* the folder was a guess: offer to remember Bo's answer even if he keeps it */
 </style>
 </head>
 <body>
@@ -530,10 +531,11 @@ function card(q){
     <div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>${esc(q.note)}</span></div>
     <div class="acts"><button class="obtn retry"><svg width="15" height="15"><use href="#i-refresh"/></svg>Try again</button><button class="obtn dismiss">Leave it, I’ll handle it</button><span class="ctrl-note">The scan is still in Scan Dump, untouched.</span></div></div></div>`;
   const fl = flagsOf(q), clean = !fl.length && q.status === 'waiting', dup = fl.includes('dup');
+  const ask = ['check-folder', 'new-vendor', 'no-location', 'no-folder'].some(f => fl.includes(f));
   const chips = (q.location ? `<span class="chip ${q.location === 'Farm' ? 'good' : 'info'}">${esc(q.location)}</span>` : '') +
     (q.docType && q.docType !== 'bill' ? `<span class="chip fyi">${esc(q.docType.replace(/_/g, ' '))}</span>` : '') +
     fl.filter(f => FLAG[f]).map(f => `<span class="chip ${FLAG[f][0]}">${FLAG[f][1]}</span>`).join('');
-  return `<div class="bill ${clean ? 'clean' : ''}" data-id="${esc(q.id)}">
+  return `<div class="bill ${clean ? 'clean' : ''} ${ask ? 'askrule' : ''}" data-id="${esc(q.id)}">
     <input type="checkbox" class="ck pick" aria-label="Select" ${clean ? '' : 'disabled'}>
     <button class="thumb" title="Open the pages"><div class="ld">Loading…</div><div class="lbl">Page${String(q.pages).includes(',') ? 's' : ''} ${esc(String(q.pages).replace(/,/g, ', '))} · click to open</div></button>
     <div class="bt">
