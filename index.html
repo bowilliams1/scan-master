@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>BOSH OS · Scan Master</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- BOSH OS · Scan Master (v1.0). Source: scan-master/site/index.src.html; build with site/build_site.py.
+     This page holds no data and no secrets: after sign-in it asks the Scan Master engine (Apps Script, sales@). -->
+<style>
+:root{
+  --bg:#090e0c; --sb:#0a100e;
+  --panel:#0e1512; --panel-2:#121b17; --panel-3:#16211c;
+  --border:#1b2621; --border-2:#26332c;
+  --text:#e8eeeb; --text-2:#aab5b0; --text-3:#8a9791; --text-4:#7a8781;
+  --green:#3fb950; --green-hi:#56d364; --green-wash:rgba(63,185,80,.12); --green-edge:rgba(63,185,80,.45);
+  --amber:#e3a33b; --amber-wash:rgba(227,163,59,.12);
+  --red:#f0524f; --red-wash:rgba(240,82,79,.12);
+  --blue:#4c9aff; --blue-wash:rgba(76,154,255,.12);
+  --font:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --r:10px; --sbw:236px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:13.5px/1.45 var(--font);-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
+.app{display:grid;grid-template-columns:var(--sbw) minmax(0,1fr);height:100vh}
+
+/* sidebar (same as Command Center) */
+.sb{display:flex;flex-direction:column;gap:6px;padding:20px 14px 16px;background:var(--sb);border-right:1px solid var(--border);overflow-y:auto}
+.brand{padding:6px 8px 22px}
+.brand .appname{margin:12px 0 0 4px;font-size:12px;font-weight:700;letter-spacing:.22em;color:var(--green-hi)}
+.brand img{display:block;width:198px;height:auto;filter:drop-shadow(0 8px 16px rgba(0,0,0,.55))}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:9px;border:0;background:none;color:var(--text-2);font-weight:500;text-align:left;transition:background .15s,color .15s}
+.nav button svg{color:var(--text-3);flex:none}
+.nav button:hover{background:rgba(255,255,255,.04);color:var(--text)}
+.nav button.active{background:linear-gradient(180deg,#2e9a40,#237d33);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 6px 18px rgba(46,154,64,.28)}
+.nav button.active svg{color:#fff}
+.nav .sep{height:1px;background:var(--border);margin:10px 8px}
+.badge{margin-left:auto;min-width:21px;height:19px;padding:0 6px;border-radius:10px;display:inline-grid;place-items:center;font-size:11px;font-weight:700}
+.badge.warn{background:var(--amber);color:#1c1405}
+.badge.fyi{background:var(--panel-3);color:var(--text-2);box-shadow:inset 0 0 0 1px var(--border-2)}
+.badge:empty{display:none}
+.grow{flex:1}
+.status{padding:13px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--panel);font-size:12px}
+.status .h{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-2);margin-bottom:8px}
+.status .line{display:flex;align-items:center;gap:8px;color:var(--green-hi);margin-bottom:8px}
+.status .line i{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+.status .skv{display:flex;justify-content:space-between;color:var(--text-3);padding:2px 0}
+.status .skv b{color:var(--text-2);font-weight:500}
+
+/* header */
+.main{display:flex;flex-direction:column;min-width:0;height:100vh}
+.sample{display:flex;align-items:center;gap:10px;padding:8px 26px;background:repeating-linear-gradient(135deg,rgba(227,163,59,.16) 0 12px,rgba(227,163,59,.08) 12px 24px);border-bottom:1px solid rgba(227,163,59,.4);color:#f2c983;font-size:12.5px;font-weight:600}
+.sample b{color:#1c1405;background:var(--amber);padding:2px 7px;border-radius:5px;font-size:11px;letter-spacing:.06em}
+.top{display:flex;align-items:center;gap:20px;padding:18px 26px 14px}
+.ttl{min-width:0;flex:1}
+.ttl h1{margin:0;font-size:26px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;line-height:1.1}
+.ttl p{margin:5px 0 0;color:var(--text-3);font-size:13px}
+.clock{display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}
+.clock span{font-size:12px;color:var(--text-2)}
+.clock b{font-size:25px;font-weight:600;color:var(--green-hi);font-variant-numeric:tabular-nums}
+.view{flex:1;min-height:0;overflow-y:auto;padding:0 26px 40px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.kpi{display:flex;align-items:center;gap:14px;padding:15px 16px;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);min-width:0}
+.ki{width:46px;height:46px;border-radius:11px;display:grid;place-items:center;flex:none;border:1px solid}
+.ki.good{color:var(--green-hi);background:var(--green-wash);border-color:rgba(63,185,80,.35)}
+.ki.warn{color:var(--amber);background:var(--amber-wash);border-color:rgba(227,163,59,.35)}
+.ki.info{color:var(--blue);background:var(--blue-wash);border-color:rgba(76,154,255,.35)}
+.ki.crit{color:var(--red);background:var(--red-wash);border-color:rgba(240,82,79,.38)}
+.kl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.kv{margin-top:4px;font-size:21px;font-weight:600;line-height:1.1}
+.ks{margin-top:4px;font-size:12px;color:var(--text-3)}
+
+/* panels */
+.pn{padding:16px 18px;background:var(--panel);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px}
+.ph{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.ph h2{margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.ph .sub{font-size:12px;color:var(--text-3)}
+.ph .sp{flex:1}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:999px;white-space:nowrap;text-transform:uppercase}
+.chip.warn{color:#eec27a;background:var(--amber-wash)} .chip.info{color:#8dbcff;background:var(--blue-wash)}
+.chip.crit{color:#f59b99;background:var(--red-wash)} .chip.good{color:var(--green-hi);background:var(--green-wash)}
+.chip.fyi{color:var(--text-2);background:rgba(255,255,255,.05)}
+
+/* scan group + bill cards */
+.scan{border:1px solid var(--border);border-radius:var(--r);background:var(--panel);margin-bottom:14px;overflow:hidden}
+.scanh{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--panel-2);flex-wrap:wrap}
+.scanh b{font-weight:600}
+.scanh span{font-size:12px;color:var(--text-3)}
+.pages{display:flex;gap:6px;margin-left:auto}
+.pg{width:26px;height:34px;border-radius:4px;border:1px solid var(--border-2);background:#1a2420;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:var(--text-2)}
+.pg.x{background:repeating-linear-gradient(45deg,#26332c 0 2px,transparent 2px 6px);color:#f59b99;border-color:rgba(240,82,79,.4)}
+.pg.b1{border-color:rgba(63,185,80,.55)} .pg.b2{border-color:rgba(76,154,255,.6)}
+.bill{display:grid;grid-template-columns:28px 150px minmax(0,1fr);gap:16px;padding:16px;border-bottom:1px solid var(--border)}
+.bill:last-child{border-bottom:0}
+.bill.done{opacity:.4;pointer-events:none}
+.ck{width:18px;height:18px;margin-top:4px;accent-color:var(--green)}
+.thumb{position:relative;width:150px;height:194px;border-radius:6px;background:#eef1ee;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.4);border:0;padding:0}
+.thumb .paper{position:absolute;inset:12px;display:flex;flex-direction:column;gap:6px}
+.thumb .paper i{display:block;height:5px;border-radius:2px;background:#c7cfc9}
+.thumb .paper i.h{height:10px;width:60%;background:#7f8c84}
+.thumb .paper i.s{width:40%}
+.thumb .stamp{position:absolute;right:12px;bottom:34px;transform:rotate(-12deg);font:700 15px 'Comic Sans MS','Bradley Hand',cursive;color:#2350b8}
+.thumb .lbl{position:absolute;left:0;right:0;bottom:0;padding:5px 6px;background:rgba(9,14,12,.82);color:var(--text-2);font-size:10.5px;text-align:center}
+.thumb .sm{position:absolute;top:7px;left:7px;font-size:9px;font-weight:700;letter-spacing:.06em;background:var(--amber);color:#1c1405;padding:2px 5px;border-radius:4px}
+.bt{min-width:0;display:flex;flex-direction:column;gap:10px}
+.btop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btop h3{margin:0;font-size:16px;font-weight:600;margin-right:4px}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.fact{padding:8px 10px;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;min-width:0}
+.fact .l{font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3)}
+.fact .v{margin-top:3px;font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fact .v em{font-style:normal;color:var(--green-hi)}
+.fact.paid .v{color:#8dbcff}
+.edit{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px}
+.fld label{display:block;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-bottom:4px}
+.fld .wrap{display:flex;align-items:center;height:38px;border:1px solid var(--border-2);border-radius:8px;background:var(--panel-2);overflow:hidden}
+.fld .wrap:focus-within{border-color:var(--green-edge);box-shadow:0 0 0 3px rgba(63,185,80,.15)}
+.fld input,.fld select{flex:1;min-width:0;height:100%;border:0;background:transparent;padding:0 10px;outline:none;font-size:13px}
+.fld select option{background:var(--panel-2)}
+.fld .ext{padding:0 10px;color:var(--text-4);font-size:12.5px}
+.fld .path{margin-top:4px;font-size:11.5px;color:var(--text-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.why{display:flex;gap:8px;padding:8px 10px;border-radius:8px;background:rgba(0,0,0,.25);border:1px solid var(--border);font-size:12px;color:var(--text-2)}
+.why svg{color:var(--green-hi);flex:none;margin-top:1px}
+.warnbox{display:flex;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(227,163,59,.4);background:var(--amber-wash);font-size:12.5px;color:#f2d29b}
+.warnbox svg{color:var(--amber);flex:none;margin-top:1px}
+.infobox{display:flex;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(76,154,255,.35);background:var(--blue-wash);font-size:12.5px;color:#bcd6ff}
+.remember{display:none;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}
+.remember input{accent-color:var(--green)}
+.changed .remember{display:flex}
+.acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.gbtn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:8px;border:1px solid rgba(255,255,255,.06);background:linear-gradient(180deg,#2e9a40,#237d33);color:#fff;font-weight:600;font-size:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+.gbtn:hover{filter:brightness(1.1)}
+.gbtn[disabled]{background:var(--panel-3);color:var(--text-3);box-shadow:none;cursor:default;filter:none}
+.obtn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 13px;border-radius:8px;border:1px solid var(--border-2);background:var(--panel-2);color:var(--text-2);font-weight:500;font-size:13px}
+.obtn:hover{color:var(--text);border-color:#34443b}
+.obtn.amber{border-color:rgba(227,163,59,.45);color:#f2d29b}
+.link{background:none;border:0;padding:0;color:var(--blue);font-size:12.5px;font-weight:500}
+.link:hover{text-decoration:underline;text-underline-offset:3px}
+.note{display:none;gap:8px}
+.note.open{display:flex}
+.note textarea{flex:1;min-height:38px;height:38px;resize:vertical;border:1px solid var(--border-2);border-radius:8px;background:var(--panel-2);padding:8px 10px;outline:none;font-size:13px}
+
+/* bulk bar */
+.bulk{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:12px;padding:10px 14px;margin-bottom:14px;border:1px solid var(--green-edge);border-radius:var(--r);background:rgba(14,21,18,.94);backdrop-filter:blur(6px)}
+.bulk label{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+.bulk input{accent-color:var(--green);width:16px;height:16px}
+.bulk .sp{flex:1}
+.bulk small{font-size:12px;color:var(--text-3)}
+
+/* tables */
+.tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.tbl th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);padding:8px 10px;border-bottom:1px solid var(--border-2);white-space:nowrap}
+.tbl td{padding:10px;border-bottom:1px solid var(--border);vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.tbl .muted{color:var(--text-3)}
+.tbl .nm{display:flex;align-items:center;gap:6px}
+.tbl .nm input{width:100%;min-width:180px;height:30px;border:1px solid var(--green-edge);border-radius:6px;background:var(--panel-2);padding:0 8px;outline:none}
+.pen{background:none;border:0;padding:2px;color:var(--text-4)}
+.pen:hover{color:var(--green-hi)}
+.act{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;border-radius:5px;white-space:nowrap}
+.act.filed{background:var(--green-wash);color:var(--green-hi)} .act.folder{background:var(--blue-wash);color:#8dbcff}
+.act.review{background:var(--amber-wash);color:#eec27a} .act.rename{background:rgba(255,255,255,.06);color:var(--text-2)}
+.act.split{background:rgba(255,255,255,.06);color:var(--text-2)} .act.dup{background:var(--red-wash);color:#f59b99}
+.tw{overflow-x:auto}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{height:30px;padding:0 11px;border-radius:7px;border:1px solid var(--border-2);background:var(--panel-2);color:var(--text-2);font-size:12px;font-weight:500}
+.fbtn.on{border-color:var(--green-edge);color:var(--text);background:var(--green-wash)}
+.search{height:30px;width:220px;max-width:100%;border:1px solid var(--border-2);border-radius:7px;background:var(--panel-2);padding:0 10px;outline:none;font-size:12.5px}
+
+.rlist{display:flex;flex-direction:column}
+.rule{display:grid;grid-template-columns:110px minmax(0,1fr) auto;gap:14px;align-items:center;padding:11px 0;border-bottom:1px solid var(--border)}
+.rule:last-child{border-bottom:0}
+.rule code{font:600 11px var(--font);color:var(--text-4)}
+.rule b{font-weight:600}
+.rule span{display:block;font-size:12px;color:var(--text-3)}
+
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;padding:11px 16px;border-radius:9px;background:#13201a;border:1px solid var(--green-edge);box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:13px;transition:all .25s;z-index:50;max-width:calc(100vw - 32px)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* mockup notes for Bo */
+.qs{border-color:rgba(76,154,255,.4)}
+.qs ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;color:var(--text-2)}
+.qs ol b{color:var(--text)}
+
+@media (max-width:1200px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:900px){
+  body{overflow:auto}
+  .app{display:block;height:auto}
+  .sb{flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 16px;gap:8px;border-right:0;border-bottom:1px solid var(--border)}
+  .brand{padding:0 8px 0 0}.brand img{width:120px}
+  .nav{flex-direction:row;flex-wrap:wrap}.nav .sep,.grow,.status{display:none}
+  .main{height:auto}.view{overflow:visible;padding:0 16px 40px}.top{padding:14px 16px}.sample{padding:8px 16px}
+  .bill{grid-template-columns:24px minmax(0,1fr)}.thumb{grid-column:2;width:120px;height:155px}.bt{grid-column:1 / -1}
+  .edit{grid-template-columns:minmax(0,1fr)}
+  .clock{display:none}
+}
+@media (max-width:560px){.kpis{grid-template-columns:minmax(0,1fr)}.facts{grid-template-columns:minmax(0,1fr)}.rule{grid-template-columns:minmax(0,1fr)}}
+/* ---- live-app additions ---- */
+.thumb canvas{display:block;width:100%;height:100%;object-fit:cover;background:#eef1ee}
+.thumb .ld{position:absolute;inset:0;display:grid;place-items:center;color:#7f8c84;font-size:11px}
+.signin{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:20px;background:radial-gradient(1200px 600px at 50% 18%,#0f1a15,var(--bg))}
+.sibox{width:100%;max-width:360px;padding:28px 26px;border:1px solid var(--border-2);border-radius:14px;background:var(--panel);box-shadow:0 30px 80px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:10px}
+.sibox img{width:190px;margin:0 auto 4px}
+.sibox h2{margin:0;text-align:center;font-size:14px;letter-spacing:.22em;color:var(--green-hi)}
+.sibox p{margin:0 0 6px;text-align:center;color:var(--text-3);font-size:13px}
+.sibox label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.sibox input{height:42px;padding:0 12px;border-radius:9px;border:1px solid var(--border-2);background:var(--panel-2);color:var(--text);font:15px var(--font);outline:none}
+.sibox input:focus{border-color:var(--green-edge);box-shadow:0 0 0 3px rgba(63,185,80,.15)}
+.sibox .gbtn{justify-content:center;height:42px;margin-top:6px}
+.sierr{min-height:18px;color:#f59b99;font-size:12.5px;text-align:center}
+.modal{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;background:rgba(5,8,7,.92)}
+.modal .mh{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border)}
+.modal .mh b{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal .mb{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.modal canvas{max-width:min(900px,100%);height:auto;box-shadow:0 10px 30px rgba(0,0,0,.5);background:#fff}
+.err{display:flex;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid rgba(240,82,79,.45);background:var(--red-wash);color:#f8b4b2;font-size:12.5px;margin-bottom:12px}
+.empty{display:flex;align-items:center;justify-content:center;gap:10px;padding:28px;border-radius:var(--r);border:1px solid rgba(63,185,80,.2);background:rgba(63,185,80,.04);color:var(--text-2)}
+.empty svg{color:var(--green-hi)}
+.status .chk{margin-top:10px;width:100%;justify-content:center;height:32px;font-size:12px}
+.status .line.warn{color:var(--amber)} .status .line.crit{color:var(--red)}
+.fld .wrap.newf{display:none;margin-top:6px}
+.fld .wrap.newf.on{display:flex}
+.busy{opacity:.55;pointer-events:none}
+.ctrl-note{font-size:11.5px;color:var(--text-4)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15zM20 17v5H6.5A2.5 2.5 0 0 1 4 19.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="sb">
+    <div class="brand"><img src="assets/bosh-logo-3d.png" alt="BOSH Chemical"><div class="appname">SCAN MASTER</div></div>
+    <nav class="nav" id="nav">
+      <button data-v="review" class="active"><svg width="18" height="18"><use href="#i-inbox"/></svg>For Review<span class="badge warn" id="bReview"></span></button>
+      <button data-v="needs"><svg width="18" height="18"><use href="#i-flag"/></svg>Needs Review<span class="badge fyi" id="bNeeds"></span></button>
+      <button data-v="log"><svg width="18" height="18"><use href="#i-list"/></svg>Activity Log</button>
+      <button data-v="rules"><svg width="18" height="18"><use href="#i-book"/></svg>Vendors &amp; Rules</button>
+      <div class="sep"></div>
+      <button onclick="location.href='https://bowilliams1.github.io/'"><svg width="18" height="18"><use href="#i-back"/></svg>Command Center</button>
+    </nav>
+    <div class="grow"></div>
+    <div class="status">
+      <div class="h">Scan Dump check</div>
+      <div class="line" id="stLine"><i></i><span id="stText">Connecting…</span></div>
+      <div class="skv"><span>Last check</span><b id="stLast">—</b></div>
+      <div class="skv"><span>Result</span><b id="stRes" style="text-align:right;max-width:120px">—</b></div>
+      <div class="skv"><span>Scans waiting</span><b id="stWait">—</b></div>
+      <button class="obtn chk" id="chkNow"><svg width="14" height="14"><use href="#i-refresh"/></svg>Check Scan Dump now</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <div class="ttl">
+        <h1 id="vt">Scan Master</h1>
+        <p id="vs">For Review · scans from Scan Dump, read and split into documents. Nothing is filed until you approve it.</p>
+      </div>
+      <div class="clock"><span id="clkD"></span><b id="clk"></b></div>
+    </header>
+
+    <div class="view">
+      <div class="err" id="topErr" hidden><svg width="15" height="15"><use href="#i-alert"/></svg><span></span></div>
+
+      <section id="v-review">
+        <div class="kpis">
+          <div class="kpi"><div class="ki warn"><svg width="22" height="22"><use href="#i-inbox"/></svg></div><div><div class="kl">Waiting for you</div><div class="kv" id="kWait">—</div><div class="ks" id="kWaitS"></div></div></div>
+          <div class="kpi"><div class="ki good"><svg width="22" height="22"><use href="#i-check"/></svg></div><div><div class="kl">Filed this week</div><div class="kv" id="kFiled">—</div><div class="ks">all approved by you</div></div></div>
+          <div class="kpi"><div class="ki info"><svg width="22" height="22"><use href="#i-flag"/></svg></div><div><div class="kl">Needs Review</div><div class="kv" id="kNeeds">—</div><div class="ks">held with a note</div></div></div>
+          <div class="kpi"><div class="ki crit"><svg width="22" height="22"><use href="#i-copy"/></svg></div><div><div class="kl">Possible duplicates</div><div class="kv" id="kDup">—</div><div class="ks">held, not filed</div></div></div>
+        </div>
+        <div class="bulk" id="bulkBar" hidden>
+          <label><input type="checkbox" id="all"> Select all clean documents</label>
+          <small id="selN">0 selected</small><span class="sp"></span>
+          <small>Anything with a warning can't be bulk-approved.</small>
+          <button class="gbtn" id="bulkGo" disabled><svg width="15" height="15"><use href="#i-check"/></svg>Approve selected</button>
+        </div>
+        <div id="reviewList"></div>
+        <p class="ctrl-note" style="margin:4px 2px">Once every document from a scan is handled, the original scan moves to <b>File Cabinet 2026 › Scanned Originals</b>. Nothing is ever deleted.</p>
+      </section>
+
+      <section id="v-needs" hidden><div id="needsList"></div></section>
+
+      <section id="v-log" hidden>
+        <div class="pn">
+          <div class="ph"><h2>Activity Log</h2><span class="sub">Every change, newest first. Also in the "Scan Master Log" sheet in File Cabinet 2026.</span><span class="sp"></span>
+            <input class="search" placeholder="Search vendor, name, amount…" id="q"></div>
+          <div class="filters" style="margin-bottom:10px" id="flt">
+            <button class="fbtn on" data-f="">All</button><button class="fbtn" data-f="filed">Filed</button><button class="fbtn" data-f="folder">New folders</button><button class="fbtn" data-f="rename">Renames</button><button class="fbtn" data-f="review">Needs Review</button><button class="fbtn" data-f="dup">Duplicates</button><button class="fbtn" data-f="error">Problems</button>
+          </div>
+          <div class="tw"><table class="tbl" id="logT">
+            <thead><tr><th>When</th><th>What</th><th>Vendor</th><th>Bill date</th><th>Amount</th><th>Paid note on bill</th><th>File name (✎ to rename)</th><th>Filed in / detail</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="v-rules" hidden>
+        <div class="pn">
+          <div class="ph"><h2>Filing rules</h2><span class="sub">What Scan Master follows. Rules you teach it with "Remember this" are listed below.</span></div>
+          <div class="rlist">
+            <div class="rule"><code>BR-FILE-011</code><div><b>42697 E 192nd = Farm · 40711 W 88th = Shop</b><span>Tells utility bills apart (PWSD Farm / PWSD Shop, Evergy › Shop).</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-003</code><div><b>A sheet with a big X separates documents</b><span>Separator sheets are left out.</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-013</code><div><b>Names follow the folder's own style</b><span>Month folders get "September". Invoice folders get "&lt;invoice #&gt; pd 9-22" from the handwritten paid note.</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-014</code><div><b>The year it was paid picks the cabinet</b><span>A December bill paid in January goes in the new year's cabinet, the same way 2025 and 2026 were filed.</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-007</code><div><b>No full account numbers or balances in names or the log</b><span>Last 4 digits at most.</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-006</code><div><b>Possible duplicates are held, never filed twice</b><span>Same name already in the folder, or same vendor + bill date + amount already filed.</span></div><span class="chip good">On</span></div>
+            <div class="rule"><code>BR-FILE-009</code><div><b>First 2027 document → File Cabinet 2027</b><span>Created with the same folders as 2026, no files.</span></div><span class="chip good">On</span></div>
+          </div>
+        </div>
+        <div class="pn">
+          <div class="ph"><h2>Rules you taught</h2><span class="sub">Saved when you tick "Remember this" while filing.</span></div>
+          <div class="tw"><table class="tbl"><thead><tr><th>Vendor</th><th>Location</th><th>Always files to</th><th>Since</th></tr></thead><tbody id="rulesT"></tbody></table></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="signin" id="signin" hidden>
+  <form class="sibox" id="siForm" autocomplete="on">
+    <img src="assets/bosh-logo-3d.png" alt="BOSH Chemical">
+    <h2>SCAN MASTER</h2>
+    <p>Sign in with your Scan Master password.</p>
+    <label for="siPw">Password</label>
+    <input id="siPw" name="password" type="password" autocomplete="current-password" required>
+    <button class="gbtn" type="submit" id="siBtn">Sign in</button>
+    <div class="sierr" id="siErr"></div>
+  </form>
+</div>
+<div class="modal" id="modal" hidden><div class="mh"><b id="mT"></b><button class="obtn" id="mOpen">Open in Drive</button><button class="obtn" id="mX">Close</button></div><div class="mb" id="mB"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbx8xjarFIhuOQ4md2ubY07ITSq-3t4whEg6Q0qqrqxVuN1EDkckWa5tBx-f3Ct0y4YQbg/exec';
+const SESSION_KEY = 'bosh_sm_session';
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = a => (a === '' || a == null || isNaN(+a)) ? '' : '$' + (+a).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const niceDate = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||'')); return m ? MON[+m[2]-1] + ' ' + (+m[3]) + ', ' + m[1] : (d || ''); };
+const niceWhen = d => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(d||'')); if (!m) return d || ''; let h = +m[4]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return MON[+m[2]-1] + ' ' + (+m[3]) + ', ' + h + ':' + m[5] + ' ' + ap; };
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+let S = null, VIEW = 'review', tt;
+function toast(m, bad){ const e = $('#toast'); e.textContent = m; e.style.borderColor = bad ? 'rgba(240,82,79,.6)' : ''; e.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => e.classList.remove('show'), bad ? 6000 : 3000); }
+function topErr(m){ const e = $('#topErr'); e.hidden = !m; e.querySelector('span').textContent = m || ''; }
+
+/* ---------- engine calls ---------- */
+function session(){ try { const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return s && s.exp > Date.now() ? s : null; } catch (e) { return null; } }
+function setSession(r){ try { localStorage.setItem(SESSION_KEY, JSON.stringify({token: r.token, exp: r.exp})); } catch (e) {} }
+async function api(body){
+  const s = session(); if (s && !body.token) body.token = s.token;
+  const r = await fetch(API, {method: 'POST', body: JSON.stringify(body)});
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch (e) { throw new Error('the engine sent an answer this page could not read'); }
+  if (j.auth === false){ try { localStorage.removeItem(SESSION_KEY); } catch (e) {} showSignIn('Please sign in again.'); throw new Error('signed out'); }
+  return j;
+}
+function showSignIn(msg){ $('#signin').hidden = false; $('#siErr').textContent = msg || ''; setTimeout(() => $('#siPw').focus(), 30); }
+$('#siForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('#siBtn'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#siErr').textContent = '';
+  try {
+    const r = await api({action: 'login', pw: $('#siPw').value});
+    if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true); }
+    else $('#siErr').textContent = r.error || 'Sign-in didn’t work. Try again.';
+  } catch (err) { $('#siErr').textContent = 'Could not reach Scan Master: ' + err.message; }
+  btn.disabled = false; btn.textContent = 'Sign in';
+});
+
+async function load(checkToo){
+  if (!session()){ showSignIn(); return; }
+  try {
+    if (checkToo) api({action: 'check'}).catch(() => {});
+    const r = await api({action: 'state'});
+    if (!r.ok){ topErr('Scan Master could not load: ' + r.error); return; }
+    topErr(''); S = r; DIRTY = false; render();
+  } catch (e) { if (e.message !== 'signed out') topErr('Could not reach Scan Master: ' + e.message + '. It will try again in a minute.'); }
+}
+
+/* ---------- render ---------- */
+const TITLES = {review: ['Scan Master', 'For Review · scans from Scan Dump, read and split into documents. Nothing is filed until you approve it.'],
+  needs: ['Needs Review', 'Documents Scan Master wasn’t sure about, and scans it couldn’t read. Each has a note.'],
+  log: ['Activity Log', 'Everything Scan Master has done, newest first.'], rules: ['Vendors & Rules', 'What Scan Master follows when it files.']};
+$$('#nav button[data-v]').forEach(b => b.onclick = () => { VIEW = b.dataset.v; $$('#nav button').forEach(x => x.classList.toggle('active', x === b));
+  $$('.view > section').forEach(s => s.hidden = s.id !== 'v-' + VIEW); $('#vt').textContent = TITLES[VIEW][0]; $('#vs').textContent = TITLES[VIEW][1]; });
+
+const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible duplicate'], 'check-folder': ['warn', 'Check folder'], 'no-folder': ['warn', 'No folder'],
+  'y2027': ['info', 'Files in 2027'], 'wrong-year': ['crit', 'Not 2026/2027'], 'no-location': ['warn', 'Farm or Shop?'], 'not-bill': ['fyi', 'Not a bill'],
+  'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'] };
+const flagsOf = q => String(q.flags || '').split(',').filter(Boolean);
+
+function render(){
+  const st = S.status, q = S.queue;
+  const waiting = q.filter(x => x.status === 'waiting'), needs = q.filter(x => x.status === 'needs' || x.status === 'error');
+  $('#bReview').textContent = waiting.length || ''; $('#bNeeds').textContent = needs.length || '';
+  $('#kWait').textContent = waiting.length + ' document' + (waiting.length === 1 ? '' : 's');
+  $('#kWaitS').textContent = 'from ' + new Set(waiting.map(x => x.scanId)).size + ' scan(s)';
+  $('#kFiled').textContent = st.filedWeek; $('#kNeeds').textContent = needs.length;
+  $('#kDup').textContent = q.filter(x => flagsOf(x).includes('dup')).length;
+  const bad = /FAILED/.test(st.lastResult) || !st.keySet, warn = /problem/.test(st.lastResult);
+  $('#stLine').className = 'line' + (bad ? ' crit' : warn ? ' warn' : '');
+  $('#stText').textContent = !st.keySet ? 'AI key missing' : bad ? 'Last check failed' : warn ? 'Check ran, with problems' : st.lastRun ? 'Running normally' : 'Not run yet';
+  $('#stLast').textContent = st.lastRun ? niceWhen(st.lastRun).replace(/^\w+ \d+, /, '') : '—';
+  $('#stRes').textContent = st.lastResult || '—'; $('#stWait').textContent = st.waitingInDump;
+  renderList('#reviewList', waiting, 'Nothing waiting. Drop scans in the Scan Dump folder and they show up here within 15 minutes (or click Check Scan Dump now).');
+  renderList('#needsList', needs, 'Nothing needs review.');
+  $('#bulkBar').hidden = !waiting.length;
+  drawLog(); drawRules(); bump();
+}
+
+function folderOptions(q){
+  const cur = q.folderPath || '';
+  let o = '<option value="">— pick a folder —</option>';
+  if (q.newFolder) o += `<option value="${esc(cur)}">➕ New folder: ${esc(cur)}</option>`;
+  S.folders.forEach(f => { o += `<option value="${esc(f)}">${esc(f.replace(/\//g, ' › '))}</option>`; });
+  o += '<option value="__new">➕ New vendor folder under Bills Paid…</option>';
+  return o;
+}
+
+function renderList(sel, items, emptyMsg){
+  const box = $(sel);
+  if (!items.length){ box.innerHTML = `<div class="empty"><svg width="18" height="18"><use href="#i-check"/></svg>${esc(emptyMsg)}</div>`; return; }
+  const groups = {}; items.forEach(x => (groups[x.scanId] = groups[x.scanId] || []).push(x));
+  box.innerHTML = Object.keys(groups).map(sid => {
+    const g = groups[sid];
+    return `<div class="scan"><div class="scanh"><svg width="18" height="18" style="color:var(--text-3)"><use href="#i-inbox"/></svg><b>${esc(g[0].scanName)}</b>
+      <span>${g.length} document${g.length === 1 ? '' : 's'} from this scan</span></div>${g.map(card).join('')}</div>`;
+  }).join('');
+  items.forEach(q => {
+    const el = box.querySelector(`[data-id="${CSS.escape(q.id)}"]`); if (!el) return;
+    if (q.status === 'error'){ el.querySelector('.retry').onclick = () => act(el, {action: 'retry', id: q.id}, 'Scan Master will read it again in a moment.'); return; }
+    const sel2 = el.querySelector('.fsel'); sel2.value = q.folderPath || '';
+    const pv = el.querySelector('.pv'), nf = el.querySelector('.newf'), nfi = nf.querySelector('input');
+    const sync = () => { nf.classList.toggle('on', sel2.value === '__new'); pv.textContent = sel2.value === '__new' ? 'Bills Paid › ' + (nfi.value || '(new folder)') : (sel2.value || '—').replace(/\//g, ' › ');
+      el.classList.toggle('changed', sel2.value !== (q.folderPath || '')); };
+    sel2.onchange = sync; nfi.oninput = sync; sync();
+    el.querySelector('.thumb').onclick = () => openPdf(q);
+    el.querySelector('.approve').onclick = () => {
+      const path = sel2.value === '__new' ? 'Bills Paid/' + nfi.value.trim() : sel2.value;
+      if (!path || path === 'Bills Paid/') return toast('Pick a folder first.', true);
+      act(el, {action: 'approve', id: q.id, folderPath: path, name: el.querySelector('.fname').value, remember: el.querySelector('.remember input').checked}, 'Filed.');
+    };
+    const tn = el.querySelector('.toNeeds'); if (tn) tn.onclick = () => el.querySelector('.note').classList.toggle('open');
+    const sv = el.querySelector('.saveNote'); if (sv) sv.onclick = () => act(el, {action: 'needs', id: q.id, note: el.querySelector('.note textarea').value}, 'Moved to Needs Review with your note.');
+    const dp = el.querySelector('.skipDup'); if (dp) dp.onclick = () => act(el, {action: 'dup', id: q.id}, 'Marked duplicate. Not filed, nothing deleted.');
+    thumb(q, el.querySelector('.thumb'));
+  });
+}
+
+function card(q){
+  if (q.status === 'error') return `<div class="bill" data-id="${esc(q.id)}" style="grid-template-columns:minmax(0,1fr)"><div class="bt">
+    <div class="btop"><h3>Couldn’t read this scan</h3><span class="chip crit">Problem</span></div>
+    <div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>${esc(q.note)}</span></div>
+    <div class="acts"><button class="obtn retry"><svg width="15" height="15"><use href="#i-refresh"/></svg>Try again</button><span class="ctrl-note">The scan is still in Scan Dump, untouched.</span></div></div></div>`;
+  const fl = flagsOf(q), clean = !fl.length && q.status === 'waiting', dup = fl.includes('dup');
+  const chips = (q.location ? `<span class="chip ${q.location === 'Farm' ? 'good' : 'info'}">${esc(q.location)}</span>` : '') +
+    (q.docType && q.docType !== 'bill' ? `<span class="chip fyi">${esc(q.docType.replace(/_/g, ' '))}</span>` : '') +
+    fl.filter(f => FLAG[f]).map(f => `<span class="chip ${FLAG[f][0]}">${FLAG[f][1]}</span>`).join('');
+  return `<div class="bill ${clean ? 'clean' : ''}" data-id="${esc(q.id)}">
+    <input type="checkbox" class="ck pick" aria-label="Select" ${clean ? '' : 'disabled'}>
+    <button class="thumb" title="Open the pages"><div class="ld">Loading…</div><div class="lbl">Page${String(q.pages).includes(',') ? 's' : ''} ${esc(String(q.pages).replace(/,/g, ', '))} · click to open</div></button>
+    <div class="bt">
+      <div class="btop"><h3>${esc(q.vendor || 'Unknown vendor')}</h3>${chips}</div>
+      <div class="facts">
+        <div class="fact"><div class="l">Service address</div><div class="v" title="${esc(q.address)}">${esc(q.address || '—')}${q.location ? ` <em>→ ${esc(q.location)}</em>` : ''}</div></div>
+        <div class="fact"><div class="l">Bill date</div><div class="v">${esc(niceDate(q.billDate) || '—')}</div></div>
+        <div class="fact"><div class="l">Amount due</div><div class="v">${esc(money(q.amount) || '—')}</div></div>
+        <div class="fact paid"><div class="l">Written on it</div><div class="v" title="${esc(q.paidNote)}">${q.paidNote ? '“' + esc(q.paidNote) + '”' : '<span style="color:var(--text-3)">nothing</span>'}</div></div>
+      </div>
+      ${q.status === 'needs' && q.note ? `<div class="warnbox"><svg width="15" height="15"><use href="#i-flag"/></svg><span>${esc(q.note)}</span></div>` : ''}
+      ${dup ? `<div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>This looks like something already filed (same name in that folder, or same vendor, date and amount). It stays here until you decide.</span></div>` : ''}
+      ${q.newFolder ? `<div class="infobox"><svg width="15" height="15"><use href="#i-folder"/></svg><span>No folder for this vendor yet. Approving creates <b>Bills Paid › ${esc(q.newFolder)}</b>. Check the name first.</span></div>` : ''}
+      <div class="edit">
+        <div class="fld"><label>Folder</label><div class="wrap"><select class="fsel">${folderOptions(q)}</select></div>
+          <div class="wrap newf"><input placeholder="New vendor folder name" value="${esc(q.newFolder || q.vendor || '')}"></div>
+          <div class="path">File Cabinet ${esc(q.year || 2026)} › <span class="pv"></span></div></div>
+        <div class="fld"><label>File name</label><div class="wrap"><input class="fname" value="${esc(q.name)}"><span class="ext">.pdf</span></div>
+          <div class="path">${q.invoiceNo ? 'Invoice ' + esc(q.invoiceNo) + ' · ' : ''}${q.last4 ? 'Account …' + esc(q.last4) : 'No account number shown'}</div></div>
+      </div>
+      <div class="why"><svg width="15" height="15"><use href="#i-spark"/></svg><span>${esc(q.why || '')}</span></div>
+      <label class="remember"><input type="checkbox"> Remember this: always file ${esc(q.vendor)}${q.location ? ' at the ' + esc(q.location) : ''} in the folder I picked.</label>
+      <div class="acts">
+        ${dup ? '<button class="obtn skipDup"><svg width="15" height="15"><use href="#i-copy"/></svg>It’s a duplicate, don’t file</button>' : ''}
+        <button class="gbtn approve"><svg width="15" height="15"><use href="#i-check"/></svg>${dup ? 'File anyway' : q.newFolder ? 'Create folder &amp; file' : 'Approve &amp; file'}</button>
+        ${q.status === 'waiting' ? '<button class="obtn amber toNeeds"><svg width="15" height="15"><use href="#i-flag"/></svg>Needs Review</button>' : ''}
+      </div>
+      <div class="note"><textarea placeholder="Note: why does this need review?"></textarea><button class="obtn saveNote">Send</button></div>
+    </div></div>`;
+}
+
+async function act(el, body, okMsg){
+  el.classList.add('busy');
+  try {
+    const r = await api(body);
+    if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); return; }
+    toast(okMsg); await load(false);
+  } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast('Could not reach Scan Master: ' + e.message, true); }
+}
+
+/* ---------- previews (pdf.js) ---------- */
+const PDFS = {};
+async function pdfData(id){
+  if (!PDFS[id]) PDFS[id] = api({action: 'pdf', id}).then(r => { if (!r.ok) throw new Error(r.error); return Uint8Array.from(atob(r.data), c => c.charCodeAt(0)); });
+  return PDFS[id];
+}
+async function thumb(q, box){
+  try {
+    if (!window.pdfjsLib) throw new Error('viewer not loaded');
+    const data = await pdfData(q.id), doc = await pdfjsLib.getDocument({data: data.slice()}).promise, pg = await doc.getPage(1);
+    const vp = pg.getViewport({scale: 1}), sc = 300 / vp.width, v2 = pg.getViewport({scale: sc});
+    const c = document.createElement('canvas'); c.width = v2.width; c.height = v2.height;
+    await pg.render({canvasContext: c.getContext('2d'), viewport: v2}).promise;
+    const ld = box.querySelector('.ld'); if (ld) ld.replaceWith(c);
+  } catch (e) { const ld = box.querySelector('.ld'); if (ld) ld.textContent = 'No preview'; }
+}
+async function openPdf(q){
+  $('#modal').hidden = false; $('#mT').textContent = q.scanName + ' · page(s) ' + q.pages; $('#mB').innerHTML = '<div style="color:var(--text-3)">Loading…</div>';
+  $('#mOpen').onclick = () => window.open('https://drive.google.com/file/d/' + encodeURIComponent(q.stagedId) + '/view?authuser=sales@boshchemical.com', '_blank', 'noopener');
+  try {
+    const data = await pdfData(q.id), doc = await pdfjsLib.getDocument({data: data.slice()}).promise;
+    $('#mB').innerHTML = '';
+    for (let i = 1; i <= doc.numPages; i++){
+      const pg = await doc.getPage(i), v = pg.getViewport({scale: 1.6}), c = document.createElement('canvas');
+      c.width = v.width; c.height = v.height; $('#mB').appendChild(c);
+      await pg.render({canvasContext: c.getContext('2d'), viewport: v}).promise;
+    }
+  } catch (e) { $('#mB').innerHTML = '<div class="err">Could not show the pages: ' + esc(e.message) + '. Use Open in Drive.</div>'; }
+}
+$('#mX').onclick = () => { $('#modal').hidden = true; $('#mB').innerHTML = ''; };
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) $('#mX').click(); });
+
+/* ---------- bulk approve ---------- */
+function bump(){ const n = $$('#reviewList .pick:checked').length; $('#selN').textContent = n + ' selected'; $('#bulkGo').disabled = !n; }
+document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('pick')) bump(); });
+$('#all').onchange = e => { $$('#reviewList .bill.clean .pick').forEach(c => c.checked = e.target.checked); bump(); };
+$('#bulkGo').onclick = async () => {
+  const els = $$('#reviewList .pick:checked').map(c => c.closest('.bill'));
+  let ok = 0, bad = 0;
+  for (const el of els){
+    el.classList.add('busy');
+    const sel = el.querySelector('.fsel');
+    try { const r = await api({action: 'approve', id: el.dataset.id, folderPath: sel.value, name: el.querySelector('.fname').value}); r.ok ? ok++ : (bad++, toast(r.error, true)); }
+    catch (e) { bad++; }
+  }
+  $('#all').checked = false; toast(ok + ' filed' + (bad ? ', ' + bad + ' not filed (see the message)' : '') + '.', !!bad); load(false);
+};
+
+/* ---------- log ---------- */
+const LBL = {filed: 'Filed', rename: 'Renamed', review: 'Needs Review', split: 'Split scan', folder: 'New folder', dup: 'Duplicate', error: 'Problem',
+  original: 'Original kept', rule: 'Rule saved', setup: 'Setup', retry: 'Try again'};
+const ACT = {filed: 'filed', rename: 'rename', review: 'review', split: 'split', folder: 'folder', dup: 'dup', error: 'dup', original: 'split', rule: 'folder', setup: 'split', retry: 'split'};
+$('#q').oninput = () => drawLog();
+$$('#flt .fbtn').forEach(b => b.onclick = () => { $$('#flt .fbtn').forEach(x => x.classList.toggle('on', x === b)); drawLog(); });
+function drawLog(){
+  if (!S) return;
+  const q = $('#q').value.toLowerCase(), f = $('#flt .on').dataset.f;
+  const rows = S.log.filter(r => (!f || r.action === f) && (!q || Object.values(r).join(' ').toLowerCase().includes(q)));
+  $('#logT tbody').innerHTML = rows.map((r, i) => `<tr>
+    <td class="muted" style="white-space:nowrap">${esc(niceWhen(r.when))}</td><td><span class="act ${ACT[r.action] || 'split'}">${esc(LBL[r.action] || r.action)}</span></td>
+    <td>${esc(r.vendor)}</td><td>${esc(niceDate(r.billDate))}</td><td>${esc(r.amount)}</td><td>${esc(r.paidNote)}</td>
+    <td>${r.action === 'filed' && r.fileId ? `<div class="nm"><span>${esc(r.fileName)}</span><button class="pen" data-i="${S.log.indexOf(r)}" title="Rename"><svg width="14" height="14"><use href="#i-pen"/></svg></button></div>` : `<span class="muted">${esc(r.fileName)}</span>`}</td>
+    <td class="muted">${esc(r.filedIn)}${r.detail ? (r.filedIn ? ' · ' : '') + esc(r.detail) : ''}${r.scanName && r.action !== 'filed' ? ' · ' + esc(r.scanName) : ''}</td></tr>`).join('')
+    || '<tr><td colspan="8" class="muted">Nothing yet.</td></tr>';
+  $$('#logT .pen').forEach(p => p.onclick = () => {
+    const r = S.log[p.dataset.i], cell = p.closest('.nm'), cur = String(r.fileName).replace(/\.pdf$/i, '');
+    cell.innerHTML = `<input value="${esc(cur)}">.pdf`;
+    const inp = cell.querySelector('input'); inp.focus(); inp.select();
+    let done = false;
+    const finish = async ok => { if (done) return; done = true; const v = inp.value.trim();
+      if (ok && v && v !== cur){ const res = await api({action: 'rename', fileId: r.fileId, name: v}).catch(e => ({ok: false, error: e.message}));
+        if (res.ok){ toast('Renamed in Drive.'); return load(false); } toast(res.error || 'Rename failed.', true); }
+      drawLog(); };
+    inp.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+    inp.onblur = () => finish(true);
+  });
+}
+function drawRules(){
+  $('#rulesT').innerHTML = S.rules.length ? S.rules.map(r => `<tr><td>${esc(r.vendor)}</td><td>${esc(r.location || 'any')}</td><td>${esc(String(r.path).replace(/\//g, ' › '))}</td><td class="muted">${esc(niceWhen(r.added))}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="muted">None yet.</td></tr>';
+}
+
+$('#chkNow').onclick = async () => { try { const r = await api({action: 'check'}); toast(r.ok ? 'Checking Scan Dump. New scans appear in a minute or two.' : r.error, !r.ok); setTimeout(() => load(false), 60000); } catch (e) {} };
+function tick(){ const d = new Date(); $('#clk').textContent = d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}); $('#clkD').textContent = d.toLocaleDateString([], {weekday: 'long', month: 'long', day: 'numeric'}); }
+tick(); setInterval(tick, 10000);
+let DIRTY = false;   // Bo is editing a card: don't refresh it out from under him
+['input', 'change'].forEach(ev => document.addEventListener(ev, e => { if (e.target.closest && e.target.closest('#reviewList, #needsList') && !e.target.classList.contains('pick')) DIRTY = true; }));
+setInterval(() => { if (session() && !DIRTY && $('#modal').hidden && !document.querySelector('.note.open, .nm input')) load(false); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(true); });
+load(true);
+</script>
+</body>
+</html>
