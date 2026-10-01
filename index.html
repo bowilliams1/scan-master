@@ -378,7 +378,12 @@ async function api(body){
   const s = session(); if (s && !body.token) body.token = s.token;
   const r = await fetch(API, {method: 'POST', body: JSON.stringify(body)});
   const t = await r.text();
-  let j; try { j = JSON.parse(t); } catch (e) { throw new Error('the engine sent an answer this page could not read'); }
+  let j; try { j = JSON.parse(t); } catch (e) {
+    const peek = String(t).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    let host = ''; try { host = new URL(r.url || API).host; } catch (x) {}
+    const err = new Error('the engine sent an answer this page could not read (' + r.status + ' from ' + host + (peek ? ': ' + peek : '') + ')');
+    err.unreadable = true; throw err;
+  }
   if (j.auth === false){ try { localStorage.removeItem(SESSION_KEY); } catch (e) {} showSignIn('Please sign in again.'); throw new Error('signed out'); }
   return j;
 }
@@ -387,7 +392,9 @@ $('#siForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#siBtn'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#siErr').textContent = '';
   try {
-    const r = await api({action: 'login', pw: $('#siPw').value});
+    let r;
+    try { r = await api({action: 'login', pw: $('#siPw').value}); }
+    catch (e1) { if (!e1.unreadable) throw e1; r = await api({action: 'login', pw: $('#siPw').value}); }   // one quiet retry
     if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true); }
     else $('#siErr').textContent = r.error || 'Sign-in didn’t work. Try again.';
   } catch (err) { $('#siErr').textContent = 'Could not reach Scan Master: ' + err.message; }
@@ -400,7 +407,7 @@ async function load(checkToo){
     if (checkToo) api({action: 'check'}).catch(() => {});
     const r = await api({action: 'state'});
     if (!r.ok){ topErr('Scan Master could not load: ' + r.error); return; }
-    topErr(''); S = r; DIRTY = false; render();
+    topErr(''); S = r; render();
   } catch (e) { if (e.message !== 'signed out') topErr('Could not reach Scan Master: ' + e.message + '. It will try again in a minute.'); }
 }
 
@@ -416,29 +423,40 @@ const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible d
   'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'] };
 const flagsOf = q => String(q.flags || '').split(',').filter(Boolean);
 
+let LOADED_AT = 0;
 function render(){
-  const st = S.status, q = S.queue;
+  LOADED_AT = Date.now();
+  const q = S.queue;
   const waiting = q.filter(x => x.status === 'waiting'), needs = q.filter(x => x.status === 'needs' || x.status === 'error');
   $('#bReview').textContent = waiting.length || ''; $('#bNeeds').textContent = needs.length || '';
   $('#kWait').textContent = waiting.length + ' document' + (waiting.length === 1 ? '' : 's');
   $('#kWaitS').textContent = 'from ' + new Set(waiting.map(x => x.scanId)).size + ' scan(s)';
-  $('#kFiled').textContent = st.filedWeek; $('#kNeeds').textContent = needs.length;
+  $('#kFiled').textContent = S.status.filedWeek; $('#kNeeds').textContent = needs.length;
   $('#kDup').textContent = q.filter(x => flagsOf(x).includes('dup')).length;
-  const mins = (a, b) => (Date.parse(String(a).replace(' ', 'T')) - Date.parse(String(b).replace(' ', 'T'))) / 60000;
-  const overdue = st.lastRun && mins(st.now, st.lastRun) > 35;
-  const stuck = st.lastRun && (!st.lastEnd || st.lastEnd < st.lastRun) && mins(st.now, st.lastRun) > 7;
-  const bad = /FAILED/.test(st.lastResult) || !st.keySet || overdue || stuck, warn = /problem/.test(st.lastResult);
-  $('#stLine').className = 'line' + (bad ? ' crit' : warn ? ' warn' : '');
-  $('#stText').textContent = !st.keySet ? 'AI key missing' : /FAILED/.test(st.lastResult) ? 'Last check failed' : stuck ? 'Last check didn’t finish'
-    : overdue ? 'No check since ' + niceWhen(st.lastRun) : warn ? 'Check ran, with problems' : st.lastRun ? 'Running normally' : 'Not run yet';
-  const today = String(st.now).slice(0, 10);
-  $('#stLast').textContent = st.lastRun ? (String(st.lastRun).slice(0, 10) === today ? niceWhen(st.lastRun).replace(/^\w+ \d+, /, '') : niceWhen(st.lastRun)) : '—';
-  $('#stRes').textContent = st.lastResult || '—'; $('#stWait').textContent = st.waitingInDump;
+  drawStatus();
   saveEdits();
   renderList('#reviewList', waiting, 'Nothing waiting. Drop scans in the Scan Dump folder and they show up here within 15 minutes (or click Check Scan Dump now).');
   renderList('#needsList', needs, 'Nothing needs review.');
   $('#bulkBar').hidden = !waiting.length;
-  drawLog(); drawRules(); bump();
+  drawLog(); drawRules(); restorePicks(); bump();
+}
+const T = d => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(String(d || '')); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN; };
+/** The status panel, worked out again every minute from the engine's clock plus the time since the last load. */
+function drawStatus(){
+  if (!S) return;
+  const st = S.status, elapsed = (Date.now() - LOADED_AT) / 60000;
+  const since = d => (T(st.now) - T(d)) / 60000 + elapsed;
+  const overdue = st.lastRun && since(st.lastRun) > 35;
+  const stuck = st.lastRun && (!st.lastEnd || st.lastEnd < st.lastRun) && since(st.lastRun) > 7;
+  const failed = /FAILED/.test(st.lastResult), orphans = (st.orphans || []).length;
+  const bad = failed || !st.keySet || overdue || stuck || orphans, warn = !bad && /problem/.test(st.lastResult);
+  $('#stLine').className = 'line' + (bad ? ' crit' : warn ? ' warn' : '');
+  $('#stText').textContent = !st.keySet ? 'AI key missing' : orphans ? orphans + ' scan(s) failed with no card' : failed ? 'Last check failed' : stuck ? 'Last check didn’t finish'
+    : overdue ? 'No check since ' + niceWhen(st.lastRun) : warn ? 'Check ran, with problems' : st.lastRun ? 'Running normally' : 'Not run yet';
+  const today = String(st.now).slice(0, 10);
+  $('#stLast').textContent = st.lastRun ? (String(st.lastRun).slice(0, 10) === today ? niceWhen(st.lastRun).replace(/^\w+ \d+, /, '') : niceWhen(st.lastRun)) : '—';
+  $('#stRes').textContent = st.lastResult || '—'; $('#stWait').textContent = st.waitingInDump;
+  if (orphans) topErr('These scans failed but their problem card was not saved: ' + st.orphans.join(', ') + '. They are still in Scan Dump, untouched; tell Claude.');
 }
 
 function folderOptions(q){
@@ -484,13 +502,12 @@ function renderList(sel, items, emptyMsg){
     el.querySelector('.thumb').onclick = () => openPdf(q);
     el.querySelector('.approve').onclick = () => {
       const b = buildApprove(el, q); if (b.error) return toast(b.error, true);
-      if (flagsOf(q).includes('dup')) b.force = true;     // the button says "File anyway"
-      act(el, b, 'Filed.');
+      act(el, b, 'Filed.');          // a duplicate of something already filed comes back as a question (see act)
     };
     const tn = el.querySelector('.toNeeds'); if (tn) tn.onclick = () => el.querySelector('.note').classList.toggle('open');
     const sv = el.querySelector('.saveNote'); if (sv) sv.onclick = () => act(el, {action: 'needs', id: q.id, note: el.querySelector('.note textarea').value}, 'Moved to Needs Review with your note.');
     const dp = el.querySelector('.skipDup'); if (dp) dp.onclick = () => act(el, {action: 'dup', id: q.id}, 'Marked duplicate. Not filed, nothing deleted.');
-    const ys = el.querySelector('.ysel'); if (ys) ys.onchange = () => { el.querySelector('.yr').textContent = ys.value; };
+    const ys = el.querySelector('.ysel'); if (ys){ ys.onchange = () => { el.querySelector('.yr').textContent = ys.value || '?'; }; ys.onchange(); }
     thumb(q, el.querySelector('.thumb'));
   });
 }
@@ -523,7 +540,8 @@ function card(q){
           <div class="wrap newf"><input placeholder="New vendor folder name" value="${esc(q.newFolder || q.vendor || '')}"></div>
           <div class="path">File Cabinet <span class="yr">${esc(+q.year === 2027 ? 2027 : 2026)}</span> › <span class="pv"></span></div>
           ${(+q.year !== 2026 || fl.includes('no-date')) ? `<div class="wrap" style="margin-top:6px"><select class="ysel" title="Which year's File Cabinet">
-            <option value="2026" ${+q.year === 2027 ? '' : 'selected'}>File Cabinet 2026</option><option value="2027" ${+q.year === 2027 ? 'selected' : ''}>File Cabinet 2027</option></select></div>` : ''}</div>
+            ${(+q.year === 2027 && !fl.includes('no-date')) ? '' : '<option value="" selected>— pick a year —</option>'}
+            <option value="2026">File Cabinet 2026</option><option value="2027" ${(+q.year === 2027 && !fl.includes('no-date')) ? 'selected' : ''}>File Cabinet 2027</option></select></div>` : ''}</div>
         <div class="fld"><label>File name</label><div class="wrap"><input class="fname" value="${esc(q.name)}"><span class="ext">.pdf</span></div>
           <div class="path">${q.invoiceNo ? 'Invoice ' + esc(q.invoiceNo) + ' · ' : ''}${q.last4 ? 'Account …' + esc(q.last4) : 'No account number shown'}</div></div>
       </div>
@@ -545,14 +563,20 @@ function buildApprove(el, q){
   if (!path || path === 'Bills Paid/') return {error: 'Pick a folder first.'};
   const name = el.querySelector('.fname').value.trim(); if (!name) return {error: 'The file name is empty.'};
   const ys = el.querySelector('.ysel');
+  if (ys && !ys.value) return {error: 'Pick which year’s File Cabinet first.'};
   return {action: 'approve', id: q.id, folderPath: path, name, remember: el.querySelector('.remember input').checked, year: ys ? +ys.value : undefined};
 }
 async function act(el, body, okMsg){
   el.classList.add('busy');
   try {
-    const r = await api(body);
-    if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); return; }
-    delete EDITS[body.id]; toast(okMsg); saveEdits(); await load(false);
+    let r = await api(body);
+    if (!r.ok && r.dup && body.action === 'approve'){
+      if (!confirm(r.error)){ el.classList.remove('busy'); saveEdits(); await load(false); return; }
+      r = await api(Object.assign({}, body, {force: true}));
+    }
+    if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); saveEdits(); await load(false); return; }
+    el.remove(); delete EDITS[body.id]; PICKED.delete(body.id);     // gone before anything saves its old state
+    toast(okMsg); saveEdits(); await load(false);
   } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast('Could not reach Scan Master: ' + e.message, true); }
 }
 
@@ -563,24 +587,33 @@ async function pdfData(id){
     .catch(e => { delete PDFS[id]; throw e; });
   return PDFS[id];
 }
+const THUMBS = {};   // id -> image, so a refresh never re-renders (and never starts another pdf.js worker)
 async function thumb(q, box){
+  const put = url => { const ld = box.querySelector('.ld'); if (!ld) return; const im = new Image(); im.src = url; im.alt = ''; im.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover'; ld.replaceWith(im); };
+  if (THUMBS[q.id]) return put(THUMBS[q.id]);
+  let doc = null;
   try {
     if (!window.pdfjsLib) throw new Error('viewer not loaded');
-    const data = await pdfData(q.id), doc = await pdfjsLib.getDocument({data: data.slice()}).promise, pg = await doc.getPage(1);
-    const vp = pg.getViewport({scale: 1}), sc = 300 / vp.width, v2 = pg.getViewport({scale: sc});
+    const data = await pdfData(q.id);
+    doc = await pdfjsLib.getDocument({data: data.slice()}).promise;
+    const pg = await doc.getPage(1), vp = pg.getViewport({scale: 1}), v2 = pg.getViewport({scale: 300 / vp.width});
     const c = document.createElement('canvas'); c.width = v2.width; c.height = v2.height;
     await pg.render({canvasContext: c.getContext('2d'), viewport: v2}).promise;
-    const ld = box.querySelector('.ld'); if (ld) ld.replaceWith(c);
+    THUMBS[q.id] = c.toDataURL('image/jpeg', 0.8); put(THUMBS[q.id]);
   } catch (e) { const ld = box.querySelector('.ld'); if (ld) ld.textContent = 'No preview'; }
+  finally { if (doc) doc.destroy(); }
 }
-let PREVIEW_GEN = 0;
+let PREVIEW_GEN = 0, PREVIEW_DOC = null;
+function closePreviewDoc(){ if (PREVIEW_DOC){ PREVIEW_DOC.destroy(); PREVIEW_DOC = null; } }
 async function openPdf(q){
+  closePreviewDoc();
   const gen = ++PREVIEW_GEN, live = () => gen === PREVIEW_GEN && !$('#modal').hidden;
   $('#modal').hidden = false; $('#mT').textContent = q.scanName + ' · page(s) ' + q.pages; $('#mB').innerHTML = '<div style="color:var(--text-3)">Loading…</div>';
   $('#mOpen').onclick = () => window.open('https://drive.google.com/file/d/' + encodeURIComponent(q.stagedId) + '/view?authuser=sales@boshchemical.com', '_blank', 'noopener');
   try {
     const data = await pdfData(q.id), doc = await pdfjsLib.getDocument({data: data.slice()}).promise;
-    if (!live()) return;
+    if (!live()){ doc.destroy(); return; }
+    PREVIEW_DOC = doc;
     $('#mB').innerHTML = '';
     for (let i = 1; i <= doc.numPages; i++){
       const pg = await doc.getPage(i); if (!live()) return;
@@ -590,13 +623,20 @@ async function openPdf(q){
     }
   } catch (e) { if (live()) $('#mB').innerHTML = '<div class="err">Could not show the pages: ' + esc(e.message) + '. Use Open in Drive.</div>'; }
 }
-$('#mX').onclick = () => { PREVIEW_GEN++; $('#modal').hidden = true; $('#mB').innerHTML = ''; };
+$('#mX').onclick = () => { PREVIEW_GEN++; closePreviewDoc(); $('#modal').hidden = true; $('#mB').innerHTML = ''; };
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) $('#mX').click(); });
 
 /* ---------- bulk approve ---------- */
+const PICKED = new Set();   // ids ticked for "Approve selected", kept across refreshes
 function bump(){ const n = $$('#reviewList .pick:checked').length; $('#selN').textContent = n + ' selected'; $('#bulkGo').disabled = !n; }
-document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('pick')) bump(); });
-$('#all').onchange = e => { $$('#reviewList .bill.clean .pick').forEach(c => c.checked = e.target.checked); bump(); };
+function restorePicks(){
+  const live = new Set();
+  $$('#reviewList .bill.clean .pick').forEach(c => { const id = c.closest('.bill').dataset.id; live.add(id); c.checked = PICKED.has(id); });
+  [...PICKED].forEach(id => { if (!live.has(id)) PICKED.delete(id); });
+  const all = $$('#reviewList .bill.clean .pick'); $('#all').checked = all.length > 0 && all.every(c => c.checked);
+}
+document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('pick')){ const id = e.target.closest('.bill').dataset.id; e.target.checked ? PICKED.add(id) : PICKED.delete(id); bump(); } });
+$('#all').onchange = e => { $$('#reviewList .bill.clean .pick').forEach(c => { c.checked = e.target.checked; const id = c.closest('.bill').dataset.id; c.checked ? PICKED.add(id) : PICKED.delete(id); }); bump(); };
 $('#bulkGo').onclick = async () => {
   const els = $$('#reviewList .pick:checked').map(c => c.closest('.bill'));
   const fails = []; let ok = 0;
@@ -606,7 +646,7 @@ $('#bulkGo').onclick = async () => {
     const b = q ? buildApprove(el, q) : {error: 'no longer waiting'};
     if (b.error){ fails.push(label + ': ' + b.error); continue; }
     el.classList.add('busy');
-    try { const r = await api(b); if (r.ok){ ok++; delete EDITS[b.id]; } else { fails.push(label + ': ' + r.error); el.classList.remove('busy'); } }
+    try { const r = await api(b); if (r.ok){ ok++; el.remove(); delete EDITS[b.id]; PICKED.delete(b.id); } else { fails.push(label + ': ' + (r.dup ? 'possible duplicate, check it on its card' : r.error)); el.classList.remove('busy'); } }
     catch (e) { fails.push(label + ': ' + e.message); el.classList.remove('busy'); }
   }
   $('#all').checked = false;
@@ -641,7 +681,7 @@ function drawLog(){
         if (res.ok){ toast('Renamed in Drive.'); return load(false); } toast(res.error || 'Rename failed.', true); }
       drawLog(); };
     inp.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
-    inp.onblur = () => finish(true);
+    inp.onblur = () => { if (inp.isConnected) finish(true); };
   });
 }
 function drawRules(){
@@ -651,16 +691,19 @@ function drawRules(){
 
 $('#chkNow').onclick = async () => {
   const b = $('#chkNow'); b.disabled = true;
-  try { const r = await api({action: 'check'}); toast(r.ok ? 'Checking Scan Dump. New scans appear in a minute or two.' : r.error, !r.ok); setTimeout(() => { if (!DIRTY) load(false); }, 60000); }
+  try { const r = await api({action: 'check'}); toast(r.ok ? 'Checking Scan Dump. New scans appear in a minute or two.' : r.error, !r.ok); setTimeout(() => { if (canRefresh()) load(false); }, 60000); }
   catch (e) { if (e.message !== 'signed out') toast('Could not reach Scan Master: ' + e.message, true); }
   b.disabled = false;
 };
 function tick(){ const d = new Date(); $('#clk').textContent = d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}); $('#clkD').textContent = d.toLocaleDateString([], {weekday: 'long', month: 'long', day: 'numeric'}); }
 tick(); setInterval(tick, 10000);
-let DIRTY = false;   // Bo is editing a card: don't refresh it out from under him
-['input', 'change'].forEach(ev => document.addEventListener(ev, e => { if (e.target.closest && e.target.closest('#reviewList, #needsList') && !e.target.classList.contains('pick')) DIRTY = true; }));
-setInterval(() => { if (session() && !DIRTY && $('#modal').hidden && !document.querySelector('.note.open, .nm input')) load(false); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !DIRTY && $('#modal').hidden && !document.querySelector('.note.open, .nm input')) load(true); });
+/** Refresh unless Bo is typing in a card, renaming in the log, or looking at a preview. His edits are kept either way (EDITS). */
+function canRefresh(){
+  const a = document.activeElement;
+  return !!session() && $('#modal').hidden && !document.querySelector('.nm input') && !(a && a.closest && a.closest('.bill'));
+}
+setInterval(() => { drawStatus(); if (canRefresh()) load(false); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && canRefresh()) load(true); });
 load(true);
 </script>
 </body>
