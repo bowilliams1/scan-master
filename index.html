@@ -547,6 +547,12 @@ function renderList(sel, items, emptyMsg){
     const tn = el.querySelector('.toNeeds'); if (tn) tn.onclick = () => el.querySelector('.note').classList.toggle('open');
     const sv = el.querySelector('.saveNote'); if (sv) sv.onclick = () => act(el, {action: 'needs', id: q.id, note: el.querySelector('.note textarea').value}, 'Moved to Needs Review with your note.');
     const dp = el.querySelector('.skipDup'); if (dp) dp.onclick = () => act(el, {action: 'dup', id: q.id}, /^ap:/.test(q.id) ? 'Card closed. The invoice stays in Accounts Payable.' : 'Marked duplicate. Not filed, nothing deleted.');
+    const rm = el.querySelector('.rmCard');
+    if (rm) rm.onclick = () => {
+      const inv = /^ap:/.test(q.id);
+      if (!confirm('Remove this card from Scan Master?\n\nNothing is deleted. ' + (inv ? 'The invoice stays in Accounts Payable.' : 'Its pages go to File Cabinet 2026 › Scanned Originals, so you can file them yourself.'))) return;
+      act(el, {action: 'remove', id: q.id}, r => inv ? 'Removed. The invoice stays in Accounts Payable.' : /Scanned Originals/.test(r.where || '') ? 'Removed. The pages are in File Cabinet 2026 › Scanned Originals.' : 'Removed. Those pages were no longer in Scan Master’s folders, so nothing was moved.');
+    };
     const ys = el.querySelector('.ysel'); if (ys){ ys.onchange = () => { el.querySelector('.yr').textContent = ys.value || '?'; }; ys.onchange(); }
     thumb(q, el.querySelector('.thumb'));
   });
@@ -594,6 +600,7 @@ function card(q){
           : /^ap:/.test(q.id) ? '<button class="obtn skipDup" title="Closes this card. The invoice stays in Accounts Payable.">Don’t file</button>' : ''}
         <button class="gbtn approve"><svg width="15" height="15"><use href="#i-check"/></svg>${dup ? 'File anyway' : q.newFolder ? 'Create folder &amp; file' : 'Approve &amp; file'}</button>
         <button class="obtn amber toNeeds"><svg width="15" height="15"><use href="#i-flag"/></svg>${q.status === 'waiting' ? 'Needs Review' : 'Park in Needs Review folder'}</button>
+        <button class="obtn rmCard" title="Takes this card off Scan Master. Nothing is deleted.">Remove</button>
       </div>
       <div class="note"><textarea placeholder="Note: why does this need review?"></textarea><button class="obtn saveNote">Send</button></div>
     </div></div>`;
@@ -619,7 +626,7 @@ async function act(el, body, okMsg){
     }
     if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); saveEdits(); await load(false); return; }
     el.remove(); delete EDITS[body.id]; PICKED.delete(body.id);     // gone before anything saves its old state
-    toast(okMsg); saveEdits(); await load(false);
+    toast(typeof okMsg === 'function' ? okMsg(r) : okMsg); saveEdits(); await load(false);
   } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast(e.unreadable ? e.message : 'Could not reach Scan Master: ' + e.message, true); }
 }
 
@@ -709,8 +716,8 @@ async function runBulk(B){
 
 /* ---------- log ---------- */
 const LBL = {filed: 'Filed', rename: 'Renamed', review: 'Needs Review', split: 'Split scan', folder: 'New folder', dup: 'Duplicate', error: 'Problem',
-  original: 'Original kept', rule: 'Rule saved', setup: 'Setup', retry: 'Try again', resume: 'Continued', dismiss: 'Left aside'};
-const ACT = {filed: 'filed', rename: 'rename', review: 'review', split: 'split', folder: 'folder', dup: 'dup', error: 'dup', original: 'split', rule: 'folder', setup: 'split', retry: 'split', resume: 'split', dismiss: 'review'};
+  original: 'Original kept', rule: 'Rule saved', setup: 'Setup', retry: 'Try again', resume: 'Continued', dismiss: 'Left aside', remove: 'Removed', note: 'Note'};
+const ACT = {filed: 'filed', rename: 'rename', review: 'review', split: 'split', folder: 'folder', dup: 'dup', error: 'dup', original: 'split', rule: 'folder', setup: 'split', retry: 'split', resume: 'split', dismiss: 'review', remove: 'review', note: 'split'};
 $('#q').oninput = () => drawLog();
 $$('#flt .fbtn').forEach(b => b.onclick = () => { $$('#flt .fbtn').forEach(x => x.classList.toggle('on', x === b)); drawLog(); });
 function drawLog(){
