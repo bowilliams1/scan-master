@@ -374,7 +374,21 @@ function topErr(m){ const e = $('#topErr'); e.hidden = !m; e.querySelector('span
 /* ---------- engine calls ---------- */
 function session(){ try { const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return s && s.exp > Date.now() ? s : null; } catch (e) { return null; } }
 function setSession(r){ try { localStorage.setItem(SESSION_KEY, JSON.stringify({token: r.token, exp: r.exp})); } catch (e) {} }
+/* Google's web apps sometimes hand back an error page instead of the answer for a few minutes after a new
+   version goes live (seen 2026-10-01). Reads are simply asked again once; clicks are never re-sent blind
+   (the page refreshes instead, so Bo can see whether it went through). */
+const READS = ['login', 'state', 'pdf', 'summary', 'ping'];
 async function api(body){
+  try { return await api1(body); }
+  catch (e) {
+    if (!e.unreadable) throw e;
+    if (READS.indexOf(body.action) >= 0){ await new Promise(r => setTimeout(r, 1500)); return await api1(body); }
+    e.message = 'Scan Master’s answer got lost on the way back (Google hiccup). The list was refreshed: check whether it went through.';
+    setTimeout(() => load(false), 500);
+    throw e;
+  }
+}
+async function api1(body){
   const s = session(); if (s && !body.token) body.token = s.token;
   const r = await fetch(API, {method: 'POST', body: JSON.stringify(body)});
   const t = await r.text();
@@ -392,9 +406,7 @@ $('#siForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#siBtn'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#siErr').textContent = '';
   try {
-    let r;
-    try { r = await api({action: 'login', pw: $('#siPw').value}); }
-    catch (e1) { if (!e1.unreadable) throw e1; r = await api({action: 'login', pw: $('#siPw').value}); }   // one quiet retry
+    const r = await api({action: 'login', pw: $('#siPw').value});   // retried once inside api() if Google garbles the answer
     if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true); }
     else $('#siErr').textContent = r.error || 'Sign-in didn’t work. Try again.';
   } catch (err) { $('#siErr').textContent = 'Could not reach Scan Master: ' + err.message; }
@@ -577,7 +589,7 @@ async function act(el, body, okMsg){
     if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); saveEdits(); await load(false); return; }
     el.remove(); delete EDITS[body.id]; PICKED.delete(body.id);     // gone before anything saves its old state
     toast(okMsg); saveEdits(); await load(false);
-  } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast('Could not reach Scan Master: ' + e.message, true); }
+  } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast(e.unreadable ? e.message : 'Could not reach Scan Master: ' + e.message, true); }
 }
 
 /* ---------- previews (pdf.js) ---------- */
