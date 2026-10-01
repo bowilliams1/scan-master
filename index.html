@@ -236,7 +236,8 @@ button{cursor:pointer}
 .fld .wrap.newf.on{display:flex}
 .busy{opacity:.55;pointer-events:none}
 .ctrl-note{font-size:11.5px;color:var(--text-4)}
-.bill.askrule .remember{display:flex}   /* the folder was a guess: offer to remember Bo's answer even if he keeps it */
+.bill.askrule .remember{display:flex}
+.bill.soft{box-shadow:inset 3px 0 0 var(--amber)}   /* a "look twice" warning: can still be bulk-approved */   /* the folder was a guess: offer to remember Bo's answer even if he keeps it */
 </style>
 </head>
 <body>
@@ -297,9 +298,9 @@ button{cursor:pointer}
           <div class="kpi"><div class="ki crit"><svg width="22" height="22"><use href="#i-copy"/></svg></div><div><div class="kl">Possible duplicates</div><div class="kv" id="kDup">—</div><div class="ks">held, not filed</div></div></div>
         </div>
         <div class="bulk" id="bulkBar" hidden>
-          <label><input type="checkbox" id="all"> Select all clean documents</label>
+          <label><input type="checkbox" id="all"> Select all</label>
           <small id="selN">0 selected</small><span class="sp"></span>
-          <small>Anything with a warning can't be bulk-approved.</small>
+          <small>Amber edge = give it a glance first. Duplicates, new folders and missing dates are never included.</small>
           <button class="gbtn" id="bulkGo" disabled><svg width="15" height="15"><use href="#i-check"/></svg>Approve selected</button>
         </div>
         <div id="reviewList"></div>
@@ -336,7 +337,7 @@ button{cursor:pointer}
         </div>
         <div class="pn">
           <div class="ph"><h2>Rules you taught</h2><span class="sub">Saved when you tick "Remember this" while filing.</span></div>
-          <div class="tw"><table class="tbl"><thead><tr><th>Vendor</th><th>Location</th><th>Always files to</th><th>Since</th></tr></thead><tbody id="rulesT"></tbody></table></div>
+          <div class="tw"><table class="tbl"><thead><tr><th>Vendor</th><th>Account</th><th>Location</th><th>Always files to</th><th>Since</th></tr></thead><tbody id="rulesT"></tbody></table></div>
         </div>
       </section>
     </div>
@@ -435,6 +436,9 @@ const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible d
   'y2027': ['info', 'Files in 2027'], 'wrong-year': ['crit', 'Not 2026/2027'], 'no-location': ['warn', 'Farm or Shop?'], 'not-bill': ['fyi', 'Not a bill'],
   'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'] };
 const flagsOf = q => String(q.flags || '').split(',').filter(Boolean);
+/* "Look twice" warnings may be bulk-approved (Bo, 2026-10-01). Everything else (duplicate, new folder, no folder,
+   no date, other year, Farm-or-Shop, not a bill) is only ever approved on its own card; the engine enforces this too. */
+const SOFT = ['unsure', 'check-folder', 'check-name'];
 
 let LOADED_AT = 0;
 function render(){
@@ -531,12 +535,13 @@ function card(q){
     <div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>${esc(q.note)}</span></div>
     <div class="acts"><button class="obtn retry"><svg width="15" height="15"><use href="#i-refresh"/></svg>Try again</button><button class="obtn dismiss">Leave it, I’ll handle it</button><span class="ctrl-note">The scan is still in Scan Dump, untouched.</span></div></div></div>`;
   const fl = flagsOf(q), clean = !fl.length && q.status === 'waiting', dup = fl.includes('dup');
+  const soft = !clean && q.status === 'waiting' && fl.length > 0 && fl.every(f => SOFT.includes(f));
   const ask = ['check-folder', 'new-vendor', 'no-location', 'no-folder'].some(f => fl.includes(f));
   const chips = (q.location ? `<span class="chip ${q.location === 'Farm' ? 'good' : 'info'}">${esc(q.location)}</span>` : '') +
     (q.docType && q.docType !== 'bill' ? `<span class="chip fyi">${esc(q.docType.replace(/_/g, ' '))}</span>` : '') +
     fl.filter(f => FLAG[f]).map(f => `<span class="chip ${FLAG[f][0]}">${FLAG[f][1]}</span>`).join('');
-  return `<div class="bill ${clean ? 'clean' : ''} ${ask ? 'askrule' : ''}" data-id="${esc(q.id)}">
-    <input type="checkbox" class="ck pick" aria-label="Select" ${clean ? '' : 'disabled'}>
+  return `<div class="bill ${clean ? 'clean' : ''} ${soft ? 'soft' : ''} ${ask ? 'askrule' : ''}" data-id="${esc(q.id)}">
+    <input type="checkbox" class="ck pick" aria-label="Select" ${clean || soft ? '' : 'disabled'}>
     <button class="thumb" title="Open the pages"><div class="ld">Loading…</div><div class="lbl">Page${String(q.pages).includes(',') ? 's' : ''} ${esc(String(q.pages).replace(/,/g, ', '))} · click to open</div></button>
     <div class="bt">
       <div class="btop"><h3>${esc(q.vendor || 'Unknown vendor')}</h3>${chips}</div>
@@ -560,7 +565,7 @@ function card(q){
           <div class="path">${q.invoiceNo ? 'Invoice ' + esc(q.invoiceNo) + ' · ' : ''}${q.last4 ? 'Account …' + esc(q.last4) : 'No account number shown'}</div></div>
       </div>
       <div class="why"><svg width="15" height="15"><use href="#i-spark"/></svg><span>${esc(q.why || '')}</span></div>
-      <label class="remember"><input type="checkbox"> Remember this: always file ${esc(q.vendor)}${q.location ? ' at the ' + esc(q.location) : ''} in the folder I picked.</label>
+      <label class="remember"><input type="checkbox"> Remember this: always file ${esc(q.vendor)}${q.last4 ? ' account …' + esc(q.last4) : ''}${q.location ? ' at the ' + esc(q.location) : ''} in the folder I picked.</label>
       <div class="acts">
         ${dup ? '<button class="obtn skipDup"><svg width="15" height="15"><use href="#i-copy"/></svg>It’s a duplicate, don’t file</button>' : ''}
         <button class="gbtn approve"><svg width="15" height="15"><use href="#i-check"/></svg>${dup ? 'File anyway' : q.newFolder ? 'Create folder &amp; file' : 'Approve &amp; file'}</button>
@@ -645,12 +650,12 @@ const PICKED = new Set();   // ids ticked for "Approve selected", kept across re
 function bump(){ const n = $$('#reviewList .pick:checked').length; $('#selN').textContent = n + ' selected'; $('#bulkGo').disabled = !n; }
 function restorePicks(){
   const live = new Set();
-  $$('#reviewList .bill.clean .pick').forEach(c => { const id = c.closest('.bill').dataset.id; live.add(id); c.checked = PICKED.has(id); });
+  $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick').forEach(c => { const id = c.closest('.bill').dataset.id; live.add(id); c.checked = PICKED.has(id); });
   [...PICKED].forEach(id => { if (!live.has(id)) PICKED.delete(id); });
-  const all = $$('#reviewList .bill.clean .pick'); $('#all').checked = all.length > 0 && all.every(c => c.checked);
+  const all = $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick'); $('#all').checked = all.length > 0 && all.every(c => c.checked);
 }
 document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('pick')){ const id = e.target.closest('.bill').dataset.id; e.target.checked ? PICKED.add(id) : PICKED.delete(id); bump(); } });
-$('#all').onchange = e => { $$('#reviewList .bill.clean .pick').forEach(c => { c.checked = e.target.checked; const id = c.closest('.bill').dataset.id; c.checked ? PICKED.add(id) : PICKED.delete(id); }); bump(); };
+$('#all').onchange = e => { $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick').forEach(c => { c.checked = e.target.checked; const id = c.closest('.bill').dataset.id; c.checked ? PICKED.add(id) : PICKED.delete(id); }); bump(); };
 $('#bulkGo').onclick = async () => {
   const els = $$('#reviewList .pick:checked').map(c => c.closest('.bill'));
   const fails = []; let ok = 0;
@@ -659,6 +664,7 @@ $('#bulkGo').onclick = async () => {
     const q = S.queue.find(x => x.id === el.dataset.id), label = (q && q.vendor ? q.vendor + ' · ' : '') + el.querySelector('.fname').value;
     const b = q ? buildApprove(el, q) : {error: 'no longer waiting'};
     if (b.error){ fails.push(label + ': ' + b.error); continue; }
+    b.bulk = true;          // the engine refuses anything with a stop warning, even if this page let it through
     el.classList.add('busy');
     try { const r = await api(b); if (r.ok){ ok++; el.remove(); delete EDITS[b.id]; PICKED.delete(b.id); } else { fails.push(label + ': ' + (r.dup ? 'possible duplicate, check it on its card' : r.error)); el.classList.remove('busy'); } }
     catch (e) { fails.push(label + ': ' + e.message); el.classList.remove('busy'); }
@@ -699,8 +705,8 @@ function drawLog(){
   });
 }
 function drawRules(){
-  $('#rulesT').innerHTML = S.rules.length ? S.rules.map(r => `<tr><td>${esc(r.vendor)}</td><td>${esc(r.location || 'any')}</td><td>${esc(String(r.path).replace(/\//g, ' › '))}</td><td class="muted">${esc(niceWhen(r.added))}</td></tr>`).join('')
-    : '<tr><td colspan="4" class="muted">None yet.</td></tr>';
+  $('#rulesT').innerHTML = S.rules.length ? S.rules.map(r => `<tr><td>${esc(r.vendor)}</td><td>${r.last4 ? '…' + esc(r.last4) : 'any'}</td><td>${esc(r.location || 'any')}</td><td>${esc(String(r.path).replace(/\//g, ' › '))}</td><td class="muted">${esc(niceWhen(r.added))}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="muted">None yet.</td></tr>';
 }
 
 $('#chkNow').onclick = async () => {
