@@ -237,7 +237,9 @@ button{cursor:pointer}
 .busy{opacity:.55;pointer-events:none}
 .ctrl-note{font-size:11.5px;color:var(--text-4)}
 .bill.askrule .remember{display:flex}
-.bill.soft{box-shadow:inset 3px 0 0 var(--amber)}   /* a "look twice" warning: can still be bulk-approved */   /* the folder was a guess: offer to remember Bo's answer even if he keeps it */
+.bill.soft{box-shadow:inset 3px 0 0 var(--amber)}
+.bulk{flex-wrap:wrap}
+@media (max-width:760px){.bulk small:not([id]){display:none}}   /* phones: keep the buttons readable */   /* a "look twice" warning: can still be bulk-approved */   /* the folder was a guess: offer to remember Bo's answer even if he keeps it */
 </style>
 </head>
 <body>
@@ -253,6 +255,7 @@ button{cursor:pointer}
   <symbol id="i-pen" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M6 3.5h12v17l-2.5-1.6-2.5 1.6-2.5-1.6-2.5 1.6-2-1.3zM9 8h6M9 11.5h6M9 15h3.5"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
 </svg>
 
@@ -261,6 +264,7 @@ button{cursor:pointer}
     <div class="brand"><img src="assets/bosh-logo-3d.png" alt="BOSH Chemical"><div class="appname">SCAN MASTER</div></div>
     <nav class="nav" id="nav">
       <button data-v="review" class="active"><svg width="18" height="18"><use href="#i-inbox"/></svg>For Review<span class="badge warn" id="bReview"></span></button>
+      <button data-v="invoices"><svg width="18" height="18"><use href="#i-receipt"/></svg>Paid Invoices<span class="badge warn" id="bInv"></span></button>
       <button data-v="needs"><svg width="18" height="18"><use href="#i-flag"/></svg>Needs Review<span class="badge fyi" id="bNeeds"></span></button>
       <button data-v="log"><svg width="18" height="18"><use href="#i-list"/></svg>Activity Log</button>
       <button data-v="rules"><svg width="18" height="18"><use href="#i-book"/></svg>Vendors &amp; Rules</button>
@@ -305,6 +309,17 @@ button{cursor:pointer}
         </div>
         <div id="reviewList"></div>
         <p class="ctrl-note" style="margin:4px 2px">Once every document from a scan is handled, the original scan moves to <b>File Cabinet 2026 › Scanned Originals</b>. Nothing is ever deleted.</p>
+      </section>
+
+      <section id="v-invoices" hidden>
+        <div class="bulk" id="bulkBarInv" hidden>
+          <label><input type="checkbox" id="allInv"> Select all</label>
+          <small id="selNInv">0 selected</small><span class="sp"></span>
+          <small>Only invoices you marked Paid in Bill Pay show here. Unpaid ones stay in Accounts Payable.</small>
+          <button class="gbtn" id="bulkGoInv" disabled><svg width="15" height="15"><use href="#i-check"/></svg>Approve selected</button>
+        </div>
+        <div id="invoiceList"></div>
+        <p class="ctrl-note" style="margin:4px 2px">Filing moves the invoice out of <b>Accounts Payable (via boshbilling)</b> into the folder you pick. Bill Pay's PDF button keeps working. Scan Master never changes Bill Pay.</p>
       </section>
 
       <section id="v-needs" hidden><div id="needsList"></div></section>
@@ -427,6 +442,7 @@ async function load(checkToo){
 
 /* ---------- render ---------- */
 const TITLES = {review: ['Scan Master', 'For Review · scans from Scan Dump, read and split into documents. Nothing is filed until you approve it.'],
+  invoices: ['Paid Invoices', 'Invoices you marked Paid in Bill Pay, ready to file. Nothing is filed until you approve it.'],
   needs: ['Needs Review', 'Documents Scan Master wasn’t sure about, and scans it couldn’t read. Each has a note.'],
   log: ['Activity Log', 'Everything Scan Master has done, newest first.'], rules: ['Vendors & Rules', 'What Scan Master follows when it files.']};
 $$('#nav button[data-v]').forEach(b => b.onclick = () => { VIEW = b.dataset.v; $$('#nav button').forEach(x => x.classList.toggle('active', x === b));
@@ -434,7 +450,7 @@ $$('#nav button[data-v]').forEach(b => b.onclick = () => { VIEW = b.dataset.v; $
 
 const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible duplicate'], 'check-folder': ['warn', 'Check folder'], 'no-folder': ['warn', 'No folder'],
   'y2027': ['info', 'Files in 2027'], 'wrong-year': ['crit', 'Not 2026/2027'], 'no-location': ['warn', 'Farm or Shop?'], 'not-bill': ['fyi', 'Not a bill'],
-  'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'] };
+  'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'], 'not-pdf': ['crit', 'Not a PDF'] };
 const flagsOf = q => String(q.flags || '').split(',').filter(Boolean);
 /* "Look twice" warnings may be bulk-approved (Bo, 2026-10-01). Everything else (duplicate, new folder, no folder,
    no date, other year, Farm-or-Shop, not a bill) is only ever approved on its own card; the engine enforces this too. */
@@ -444,22 +460,25 @@ let LOADED_AT = 0;
 function render(){
   LOADED_AT = Date.now();
   const q = S.queue;
-  const waiting = q.filter(x => x.status === 'waiting'), needs = q.filter(x => x.status === 'needs' || x.status === 'error');
-  $('#bReview').textContent = waiting.length || ''; $('#bNeeds').textContent = needs.length || '';
+  const isInv = x => /^ap:/.test(String(x.id || ''));
+  const waiting = q.filter(x => x.status === 'waiting' && !isInv(x)), invoices = q.filter(x => x.status === 'waiting' && isInv(x));
+  const needs = q.filter(x => x.status === 'needs' || x.status === 'error');
+  $('#bReview').textContent = waiting.length || ''; $('#bInv').textContent = invoices.length || ''; $('#bNeeds').textContent = needs.length || '';
   $('#kWait').textContent = waiting.length + ' document' + (waiting.length === 1 ? '' : 's');
   $('#kWaitS').textContent = 'from ' + new Set(waiting.map(x => x.scanId)).size + ' scan(s)';
   $('#kFiled').textContent = S.status.filedWeek; $('#kNeeds').textContent = needs.length;
   $('#kDup').textContent = q.filter(x => flagsOf(x).includes('dup')).length;
-  drawStatus();
+  drawStatus(true);
   saveEdits();
   renderList('#reviewList', waiting, 'Nothing waiting. Drop scans in the Scan Dump folder and they show up here within 15 minutes (or click Check Scan Dump now).');
+  renderList('#invoiceList', invoices, 'No paid invoices waiting. When you click Paid in Bill Pay, the invoice shows up here within 15 minutes (or click Check Scan Dump now).');
   renderList('#needsList', needs, 'Nothing needs review.');
-  $('#bulkBar').hidden = !waiting.length;
+  $('#bulkBar').hidden = !waiting.length; $('#bulkBarInv').hidden = !invoices.length;
   drawLog(); drawRules(); restorePicks(); bump();
 }
 const T = d => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(String(d || '')); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN; };
 /** The status panel, worked out again every minute from the engine's clock plus the time since the last load. */
-function drawStatus(){
+function drawStatus(fromLoad){
   if (!S) return;
   const st = S.status, elapsed = (Date.now() - LOADED_AT) / 60000;
   const since = d => (T(st.now) - T(d)) / 60000 + elapsed;
@@ -473,6 +492,8 @@ function drawStatus(){
   const today = String(st.now).slice(0, 10);
   $('#stLast').textContent = st.lastRun ? (String(st.lastRun).slice(0, 10) === today ? niceWhen(st.lastRun).replace(/^\w+ \d+, /, '') : niceWhen(st.lastRun)) : '—';
   $('#stRes').textContent = st.lastResult || '—'; $('#stWait').textContent = st.waitingInDump;
+  if (st.billPayErr && !bad) { $('#stLine').className = 'line warn'; $('#stText').textContent = 'Bill Pay check had a problem'; }
+  if (fromLoad && st.billPayErr && !orphans) topErr(st.billPayErr + ' Scan Master keeps checking every 15 minutes.');
   if (orphans) topErr('These scans failed but their problem card was not saved: ' + st.orphans.join(', ') + '. They are still in Scan Dump, untouched; tell Claude.');
 }
 
@@ -487,7 +508,7 @@ function folderOptions(q){
 
 const EDITS = {};   // what Bo changed on each card, kept across refreshes until that card's action succeeds
 function saveEdits(){
-  $$('#reviewList .bill[data-id], #needsList .bill[data-id]').forEach(el => {
+  $$('#reviewList .bill[data-id], #invoiceList .bill[data-id], #needsList .bill[data-id]').forEach(el => {
     const f = el.querySelector('.fsel'); if (!f) return;
     EDITS[el.dataset.id] = { folder: f.value, newFolder: el.querySelector('.newf input').value, name: el.querySelector('.fname').value,
       remember: el.querySelector('.remember input').checked, year: el.querySelector('.ysel') ? el.querySelector('.ysel').value : '',
@@ -500,6 +521,8 @@ function renderList(sel, items, emptyMsg){
   const groups = {}; items.forEach(x => (groups[x.scanId] = groups[x.scanId] || []).push(x));
   box.innerHTML = Object.keys(groups).map(sid => {
     const g = groups[sid];
+    if (sid === 'billpay') return `<div class="scan"><div class="scanh"><svg width="18" height="18" style="color:var(--text-3)"><use href="#i-receipt"/></svg><b>Paid in Bill Pay</b>
+      <span>${g.length} invoice${g.length === 1 ? '' : 's'} from Accounts Payable</span></div>${g.map(card).join('')}</div>`;
     return `<div class="scan"><div class="scanh"><svg width="18" height="18" style="color:var(--text-3)"><use href="#i-inbox"/></svg><b>${esc(g[0].scanName)}</b>
       <span>${g.length} document${g.length === 1 ? '' : 's'} from this scan</span></div>${g.map(card).join('')}</div>`;
   }).join('');
@@ -523,7 +546,7 @@ function renderList(sel, items, emptyMsg){
     };
     const tn = el.querySelector('.toNeeds'); if (tn) tn.onclick = () => el.querySelector('.note').classList.toggle('open');
     const sv = el.querySelector('.saveNote'); if (sv) sv.onclick = () => act(el, {action: 'needs', id: q.id, note: el.querySelector('.note textarea').value}, 'Moved to Needs Review with your note.');
-    const dp = el.querySelector('.skipDup'); if (dp) dp.onclick = () => act(el, {action: 'dup', id: q.id}, 'Marked duplicate. Not filed, nothing deleted.');
+    const dp = el.querySelector('.skipDup'); if (dp) dp.onclick = () => act(el, {action: 'dup', id: q.id}, /^ap:/.test(q.id) ? 'Card closed. The invoice stays in Accounts Payable.' : 'Marked duplicate. Not filed, nothing deleted.');
     const ys = el.querySelector('.ysel'); if (ys){ ys.onchange = () => { el.querySelector('.yr').textContent = ys.value || '?'; }; ys.onchange(); }
     thumb(q, el.querySelector('.thumb'));
   });
@@ -567,7 +590,8 @@ function card(q){
       <div class="why"><svg width="15" height="15"><use href="#i-spark"/></svg><span>${esc(q.why || '')}</span></div>
       <label class="remember"><input type="checkbox"> Remember this: always file ${esc(q.vendor)}${q.last4 ? ' account …' + esc(q.last4) : ''}${q.location ? ' at the ' + esc(q.location) : ''} in the folder I picked.</label>
       <div class="acts">
-        ${dup ? '<button class="obtn skipDup"><svg width="15" height="15"><use href="#i-copy"/></svg>It’s a duplicate, don’t file</button>' : ''}
+        ${dup ? '<button class="obtn skipDup"><svg width="15" height="15"><use href="#i-copy"/></svg>It’s a duplicate, don’t file</button>'
+          : /^ap:/.test(q.id) ? '<button class="obtn skipDup" title="Closes this card. The invoice stays in Accounts Payable.">Don’t file</button>' : ''}
         <button class="gbtn approve"><svg width="15" height="15"><use href="#i-check"/></svg>${dup ? 'File anyway' : q.newFolder ? 'Create folder &amp; file' : 'Approve &amp; file'}</button>
         <button class="obtn amber toNeeds"><svg width="15" height="15"><use href="#i-flag"/></svg>${q.status === 'waiting' ? 'Needs Review' : 'Park in Needs Review folder'}</button>
       </div>
@@ -645,21 +669,29 @@ async function openPdf(q){
 $('#mX').onclick = () => { PREVIEW_GEN++; closePreviewDoc(); $('#modal').hidden = true; $('#mB').innerHTML = ''; };
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) $('#mX').click(); });
 
-/* ---------- bulk approve ---------- */
+/* ---------- bulk approve (For Review and Paid Invoices each have their own bar) ---------- */
 const PICKED = new Set();   // ids ticked for "Approve selected", kept across refreshes
-function bump(){ const n = $$('#reviewList .pick:checked').length; $('#selN').textContent = n + ' selected'; $('#bulkGo').disabled = !n; }
+const BULKS = [{list: '#reviewList', all: '#all', go: '#bulkGo', n: '#selN'}, {list: '#invoiceList', all: '#allInv', go: '#bulkGoInv', n: '#selNInv'}];
+const tickable = B => $$(B.list + ' .bill.clean .pick, ' + B.list + ' .bill.soft .pick');
+function bump(){ BULKS.forEach(B => { const n = $$(B.list + ' .pick:checked').length; $(B.n).textContent = n + ' selected'; $(B.go).disabled = !n; }); }
 function restorePicks(){
   const live = new Set();
-  $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick').forEach(c => { const id = c.closest('.bill').dataset.id; live.add(id); c.checked = PICKED.has(id); });
+  BULKS.forEach(B => {
+    const all = tickable(B);
+    all.forEach(c => { const id = c.closest('.bill').dataset.id; live.add(id); c.checked = PICKED.has(id); });
+    $(B.all).checked = all.length > 0 && all.every(c => c.checked);
+  });
   [...PICKED].forEach(id => { if (!live.has(id)) PICKED.delete(id); });
-  const all = $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick'); $('#all').checked = all.length > 0 && all.every(c => c.checked);
 }
 document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('pick')){ const id = e.target.closest('.bill').dataset.id; e.target.checked ? PICKED.add(id) : PICKED.delete(id); bump(); } });
-$('#all').onchange = e => { $$('#reviewList .bill.clean .pick, #reviewList .bill.soft .pick').forEach(c => { c.checked = e.target.checked; const id = c.closest('.bill').dataset.id; c.checked ? PICKED.add(id) : PICKED.delete(id); }); bump(); };
-$('#bulkGo').onclick = async () => {
-  const els = $$('#reviewList .pick:checked').map(c => c.closest('.bill'));
+BULKS.forEach(B => {
+  $(B.all).onchange = e => { tickable(B).forEach(c => { c.checked = e.target.checked; const id = c.closest('.bill').dataset.id; c.checked ? PICKED.add(id) : PICKED.delete(id); }); bump(); };
+  $(B.go).onclick = () => runBulk(B);
+});
+async function runBulk(B){
+  const els = $$(B.list + ' .pick:checked').map(c => c.closest('.bill'));
   const fails = []; let ok = 0;
-  $('#bulkGo').disabled = true;
+  $(B.go).disabled = true;
   for (const el of els){
     const q = S.queue.find(x => x.id === el.dataset.id), label = (q && q.vendor ? q.vendor + ' · ' : '') + el.querySelector('.fname').value;
     const b = q ? buildApprove(el, q) : {error: 'no longer waiting'};
@@ -669,11 +701,11 @@ $('#bulkGo').onclick = async () => {
     try { const r = await api(b); if (r.ok){ ok++; el.remove(); delete EDITS[b.id]; PICKED.delete(b.id); } else { fails.push(label + ': ' + (r.dup ? 'possible duplicate, check it on its card' : r.error)); el.classList.remove('busy'); } }
     catch (e) { fails.push(label + ': ' + e.message); el.classList.remove('busy'); }
   }
-  $('#all').checked = false;
+  $(B.all).checked = false;
   toast(ok + ' filed' + (fails.length ? ', ' + fails.length + ' not filed (see the red box)' : '') + '.', !!fails.length);
   saveEdits(); await load(false);
   if (fails.length) topErr('Not filed: ' + fails.join(' | '));
-};
+}
 
 /* ---------- log ---------- */
 const LBL = {filed: 'Filed', rename: 'Renamed', review: 'Needs Review', split: 'Split scan', folder: 'New folder', dup: 'Duplicate', error: 'Problem',
