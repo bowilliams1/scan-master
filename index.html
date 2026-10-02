@@ -269,7 +269,7 @@ button{cursor:pointer}
       <button data-v="log"><svg width="18" height="18"><use href="#i-list"/></svg>Activity Log</button>
       <button data-v="rules"><svg width="18" height="18"><use href="#i-book"/></svg>Vendors &amp; Rules</button>
       <div class="sep"></div>
-      <button onclick="location.href='https://bowilliams1.github.io/'"><svg width="18" height="18"><use href="#i-back"/></svg>Command Center</button>
+      <button id="toCC"><svg width="18" height="18"><use href="#i-back"/></svg>Command Center</button>
     </nav>
     <div class="grow"></div>
     <div class="status">
@@ -384,6 +384,13 @@ const niceDate = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d||''))
 const niceWhen = d => { const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(d||'')); if (!m) return d || ''; let h = +m[4]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return MON[+m[2]-1] + ' ' + (+m[3]) + ', ' + h + ':' + m[5] + ' ' + ap; };
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+/* v1.10 speed plan (2026-10-02, PERF_PLAN P1-P5): every timing in one place, in milliseconds.
+   poll = ask for new cards while on screen; reshow = cheap local look at "am I on screen again?";
+   stale = how old the cards may be when the page comes back on screen; debounce = one refresh this long after the last click;
+   failTtl = how long a thumbnail that could not be made is not asked for again; readTimeout = give up on a read
+   (never a change) that has had no answer this long, so one stuck request can't stop the page refreshing. */
+const TIMING = {poll: 60000, reshow: 5000, stale: 60000, debounce: 2500, failTtl: 600000, refusalWait: 2000, readRetry: 1500, readTimeout: 120000};
+const wait = ms => new Promise(r => setTimeout(r, ms));
 let S = null, VIEW = 'review', tt;
 function toast(m, bad){ const e = $('#toast'); e.textContent = m; e.style.borderColor = bad ? 'rgba(240,82,79,.6)' : ''; e.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => e.classList.remove('show'), bad ? 6000 : 3000); }
 function topErr(m){ const e = $('#topErr'); e.hidden = !m; e.querySelector('span').textContent = m || ''; }
@@ -412,50 +419,138 @@ async function api(body){
   try { return await api1(body); }
   catch (e) {
     if (!e.unreadable) throw e;
-    if (READS.indexOf(body.action) >= 0){ await new Promise(r => setTimeout(r, 1500)); return await api1(body); }
+    if (READS.indexOf(body.action) >= 0){ await wait(TIMING.readRetry); return await api1(body); }
     e.message = 'Scan Master’s answer got lost on the way back (Google hiccup). The list was refreshed: check whether it went through.';
-    setTimeout(() => load(false), 500);
+    scheduleRefresh();
     throw e;
   }
 }
+/* Every request says where it came from (this tab, or the Command Center's frame) and its number, so the engine's
+   log can tell copies of the page apart (v1.10). The engine only logs them. */
+const SRC = window.top !== window ? 'frame' : 'tab';
+let REQ_SEQ = 0, REFUSAL = null;
 async function api1(body){
   const s = session(); if (s && !body.token) body.token = s.token;
-  const r = await fetch(API, {method: 'POST', body: JSON.stringify(body)});
-  const t = await r.text();
+  // No pass, nothing to send: a request without one is always refused, and its late answer must never touch a newer sign-in.
+  if (!body.token && body.action !== 'login' && body.action !== 'ping'){ needSignIn(); throw new Error('signed out'); }
+  body.src = SRC; body.seq = ++REQ_SEQ;
+  const ctl = READS.indexOf(body.action) >= 0 && window.AbortController ? new AbortController() : null;
+  const to = ctl ? setTimeout(() => ctl.abort(), TIMING.readTimeout) : 0;
+  let r, t;
+  try { r = await fetch(API, ctl ? {method: 'POST', body: JSON.stringify(body), signal: ctl.signal} : {method: 'POST', body: JSON.stringify(body)}); t = await r.text(); }
+  catch (e) { if (ctl && ctl.signal.aborted) e = new Error('no answer after ' + Math.round(TIMING.readTimeout / 1000) + ' seconds'); e.network = true; throw e; }
+  finally { clearTimeout(to); }
   let j; try { j = JSON.parse(t); } catch (e) {
     const peek = String(t).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
     let host = ''; try { host = new URL(r.url || API).host; } catch (x) {}
     const err = new Error('the engine sent an answer this page could not read (' + r.status + ' from ' + host + (peek ? ': ' + peek : '') + ')');
     err.unreadable = true; throw err;
   }
-  if (j.auth === false){
-    // Never throw a pass away on one "no": ask once more (a refused request did nothing on the engine, so it is safe to resend).
-    if (!body.again && body.action !== 'login'){ await new Promise(r => setTimeout(r, 2000)); return api1(Object.assign({}, body, {again: true})); }
-    dropSession(j.why || 'refused'); showSignIn(signInReason() || 'Please sign in again.'); throw new Error('signed out');
-  }
+  if (j.auth === false) return refused(body, j);
   return j;
 }
+/* A refused pass (v1.10, plan P5). Only "no-record" is asked about once more (a refused request did nothing on the
+   engine, so it is safe to resend), and requests sent at the same moment share that one question. "expired" and
+   "password-changed" are final: asking again would come back "no-record" (the engine already removed the record)
+   and the sign-in box would show the wrong reason. */
+async function refused(body, j){
+  const cur = session();
+  // Sent with an older pass and Bo has signed in again since: the engine did nothing, so ask once more with the current pass.
+  if (cur && cur.token !== body.token){ if (body.repass) throw new Error('signed out'); return api1(Object.assign({}, body, {token: cur.token, repass: true})); }
+  if (!cur){ showSignIn(signInReason() || 'Please sign in again.'); throw new Error('signed out'); }   // another answer already signed out: keep its reason
+  if (j.why === 'no-record' && !body.again && body.action !== 'login'){
+    if (REFUSAL && REFUSAL.token === body.token){
+      const passOk = await REFUSAL.p.then(() => true, e => e.message !== 'signed out');
+      if (!passOk) throw new Error('signed out');
+      return api1(Object.assign({}, body, {again: true}));
+    }
+    const ref = {token: body.token};
+    ref.p = wait(TIMING.refusalWait).then(() => api1(Object.assign({}, body, {again: true})));
+    REFUSAL = ref;
+    ref.p.then(() => {}, () => {}).then(() => { if (REFUSAL === ref) REFUSAL = null; });
+    return ref.p;
+  }
+  dropSession(j.why || 'refused'); showSignIn(signInReason() || 'Please sign in again.'); throw new Error('signed out');
+}
+/** No pass in this page any more (another copy signed out, or the 30 days ran out): show the sign-in box, never a dead page. */
+function needSignIn(){ if (!session() && $('#signin').hidden) showSignIn(signInReason() || 'Please sign in again.'); }
 function showSignIn(msg){ $('#signin').hidden = false; $('#siErr').textContent = msg || ''; setTimeout(() => $('#siPw').focus(), 30); }
 $('#siForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = $('#siBtn'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#siErr').textContent = '';
   try {
     const r = await api({action: 'login', pw: $('#siPw').value});   // retried once inside api() if Google garbles the answer
-    if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true);
+    if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; FIRST = true; showLoading(); load();
       if (!storageWorks()) toast('Signed in, but this browser won’t remember it (private window or a privacy setting). You’ll be asked again next time.', true); }
     else $('#siErr').textContent = r.error || 'Sign-in didn’t work. Try again.';
   } catch (err) { $('#siErr').textContent = 'Could not reach Scan Master: ' + err.message; }
   btn.disabled = false; btn.textContent = 'Sign in';
 });
 
-async function load(checkToo){
-  if (!session()){ showSignIn(signInReason()); return; }
+/* ---------- loading the cards (v1.10, plan P1-P3) ----------
+   One load at a time: a load asked for while one is running makes exactly one more run after it.
+   An answer asked for before Bo's latest change (or arriving while a change is still going) is dropped, so a card he
+   just filed never comes back; the one refresh after that change redraws instead.
+   BUSY counts changes in flight (a card's button, Approve selected, a rename): nothing refreshes or checks meanwhile. */
+let LOADING = null, DIRTY = false, FIRST = true, BUSY = 0, CLOCK = 0, LAST_WRITE = 0, LOAD_MARK = 0, REFRESH_T = null, STICKY = null;
+function load(){
+  if (!session()){ showSignIn(signInReason()); return Promise.resolve(); }
+  if (LOADING){ DIRTY = true; return LOADING; }
+  LOADING = (async () => {
+    try { do { DIRTY = false; await loadOnce(); } while (DIRTY && session()); }
+    finally { LOADING = null; }
+  })();
+  return LOADING;
+}
+async function loadOnce(){
+  const mark = LOAD_MARK = ++CLOCK;
   try {
-    if (checkToo) api({action: 'check'}).catch(() => {});
     const r = await api({action: 'state'});
+    if (BUSY || mark < LAST_WRITE) return;
     if (!r.ok){ topErr('Scan Master could not load: ' + r.error); return; }
     topErr(''); S = r; render();
+    if (STICKY && Date.now() < STICKY.until) topErr(STICKY.msg); else STICKY = null;
+    if (FIRST){ FIRST = false; autoCheck(r.status); }
   } catch (e) { if (e.message !== 'signed out') topErr('Could not reach Scan Master: ' + e.message + '. It will try again in a minute.'); }
+}
+/** After a change: one refresh about 2.5 s after the last one finishes (also after a failed change, so Bo sees the real state). */
+function scheduleRefresh(){
+  clearTimeout(REFRESH_T);
+  REFRESH_T = setTimeout(function due(){
+    REFRESH_T = null;
+    if (!session()) return;
+    if (LOADING && LOAD_MARK > LAST_WRITE) return;          // a load that started after the change is already on its way
+    if (!canRefresh(true)){ REFRESH_T = setTimeout(due, TIMING.debounce); return; }   // a change still going, a preview open, or Bo typing: look again shortly
+    load();
+  }, TIMING.debounce);
+}
+/** A write finished (ok or not): older answers are now out of date. */
+function wrote(){ LAST_WRITE = ++CLOCK; }
+/* Hidden tab, or inside a Command Center frame that is not on screen (the frame gets no visibilitychange when the
+   Command Center switches views, and its Home view hides the frame with display:none, so look at the frame's own box). */
+function pageHidden(){
+  if (document.hidden) return true;
+  try { return !!(window.frameElement && window.frameElement.getClientRects().length === 0); } catch (e) { return false; }
+}
+/* "Check Scan Dump" is only sent automatically on the first load after opening or signing in, and only when the
+   last check is old (plan P2): more than 10 minutes ago, or scans are waiting and no check is running.
+   A "running since" older than 7 minutes counts as not running (a killed run never clears it). The engine also
+   skips automatic checks within 5 minutes of the last one; the button always goes through (now: true). */
+function checkDue(st){
+  const age = d => (T(st.now) - T(d)) / 60000;      // minutes, by the engine's own clock
+  if (!st.lastRun || !(age(st.lastRun) <= 10)) return true;
+  const m = /^running since (.+)/.exec(String(st.lastResult || ''));
+  return +st.waitingInDump > 0 && !(m && age(m[1]) <= 7);
+}
+function autoCheck(st){
+  if (BUSY || pageHidden() || !checkDue(st)) return;
+  api({action: 'check'}).then(r => { if (!r.ok) console.warn('Scan Master: the automatic check did not start: ' + (r.error || 'no reason given')); })
+    .catch(e => { if (e.message !== 'signed out') console.warn('Scan Master: the automatic check was not sent: ' + e.message); });
+}
+function showLoading(){
+  if (S) return;
+  ['#reviewList', '#invoiceList', '#needsList'].forEach(s => { $(s).innerHTML = '<div class="empty"><svg width="18" height="18"><use href="#i-refresh"/></svg>Loading your scans...</div>'; });
+  $('#stText').textContent = 'Loading your scans...';
 }
 
 /* ---------- render ---------- */
@@ -464,7 +559,8 @@ const TITLES = {review: ['Scan Master', 'For Review · scans from Scan Dump, rea
   needs: ['Needs Review', 'Documents Scan Master wasn’t sure about, and scans it couldn’t read. Each has a note.'],
   log: ['Activity Log', 'Everything Scan Master has done, newest first.'], rules: ['Vendors & Rules', 'What Scan Master follows when it files.']};
 $$('#nav button[data-v]').forEach(b => b.onclick = () => { VIEW = b.dataset.v; $$('#nav button').forEach(x => x.classList.toggle('active', x === b));
-  $$('.view > section').forEach(s => s.hidden = s.id !== 'v-' + VIEW); $('#vt').textContent = TITLES[VIEW][0]; $('#vs').textContent = TITLES[VIEW][1]; });
+  $$('.view > section').forEach(s => s.hidden = s.id !== 'v-' + VIEW); $('#vt').textContent = TITLES[VIEW][0]; $('#vs').textContent = TITLES[VIEW][1];
+  pumpThumbs(); });   // a list's thumbnails load when its tab opens
 
 const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible duplicate'], 'check-folder': ['warn', 'Check folder'], 'no-folder': ['warn', 'No folder'],
   'y2027': ['info', 'Files in 2027'], 'wrong-year': ['crit', 'Not 2026/2027'], 'no-location': ['warn', 'Farm or Shop?'], 'not-bill': ['fyi', 'Not a bill'],
@@ -494,6 +590,7 @@ function render(){
   renderList('#needsList', needs, 'Nothing needs review.');
   $('#bulkBar').hidden = !waiting.length; $('#bulkBarInv').hidden = !invoices.length;
   drawLog(); drawRules(); restorePicks(); bump();
+  pruneCaches(q); pumpThumbs();
 }
 const T = d => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(String(d || '')); return m ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : NaN; };
 /** The status panel, worked out again every minute from the engine's clock plus the time since the last load. */
@@ -552,7 +649,8 @@ function renderList(sel, items, emptyMsg){
     const sel2 = el.querySelector('.fsel'); sel2.value = q.folderPath || '';
     const pv = el.querySelector('.pv'), nf = el.querySelector('.newf'), nfi = nf.querySelector('input');
     const ed = EDITS[q.id];
-    if (ed){ if ([...sel2.options].some(o => o.value === ed.folder)) sel2.value = ed.folder; nfi.value = ed.newFolder; el.querySelector('.fname').value = ed.name;
+    // A blank folder is never kept as Bo's choice: it also happens when the card was drawn while its folder was missing from the list.
+    if (ed){ if (ed.folder && [...sel2.options].some(o => o.value === ed.folder)) sel2.value = ed.folder; nfi.value = ed.newFolder; el.querySelector('.fname').value = ed.name;
       el.querySelector('.remember input').checked = ed.remember; if (ed.year && el.querySelector('.ysel')) el.querySelector('.ysel').value = ed.year;
       el.querySelector('.note textarea').value = ed.note; el.querySelector('.note').classList.toggle('open', ed.noteOpen); }
     const sync = () => { nf.classList.toggle('on', sel2.value === '__new'); pv.textContent = sel2.value === '__new' ? 'Bills Paid › ' + (nfi.value || '(new folder)') : (sel2.value || '—').replace(/\//g, ' › ');
@@ -573,7 +671,7 @@ function renderList(sel, items, emptyMsg){
       act(el, {action: 'remove', id: q.id}, r => inv ? 'Removed. The invoice stays in Accounts Payable.' : /Scanned Originals/.test(r.where || '') ? 'Removed. The pages are in File Cabinet 2026 › Scanned Originals.' : 'Removed. Those pages were no longer in Scan Master’s folders, so nothing was moved.');
     };
     const ys = el.querySelector('.ysel'); if (ys){ ys.onchange = () => { el.querySelector('.yr').textContent = ys.value || '?'; }; ys.onchange(); }
-    thumb(q, el.querySelector('.thumb'));
+    paintThumb(q);      // a thumbnail already made (or a photo / remembered failure) shows at once; new ones load through pumpThumbs
   });
 }
 
@@ -591,7 +689,7 @@ function card(q){
     fl.filter(f => FLAG[f]).map(f => `<span class="chip ${FLAG[f][0]}">${FLAG[f][1]}</span>`).join('');
   return `<div class="bill ${clean ? 'clean' : ''} ${soft ? 'soft' : ''} ${ask ? 'askrule' : ''}" data-id="${esc(q.id)}">
     <input type="checkbox" class="ck pick" aria-label="Select" ${clean || soft ? '' : 'disabled'}>
-    <button class="thumb" title="Open the pages"><div class="ld">Loading…</div><div class="lbl">Page${String(q.pages).includes(',') ? 's' : ''} ${esc(String(q.pages).replace(/,/g, ', '))} · click to open</div></button>
+    <button class="thumb" title="Open the pages"><div class="ld" data-t="1">Loading…</div><div class="lbl">Page${String(q.pages).includes(',') ? 's' : ''} ${esc(String(q.pages).replace(/,/g, ', '))} · click to open</div></button>
     <div class="bt">
       <div class="btop"><h3>${esc(q.vendor || 'Unknown vendor')}</h3>${chips}</div>
       <div class="facts">
@@ -638,44 +736,92 @@ function buildApprove(el, q){
   const name = el.querySelector('.fname').value.trim(); if (!name) return {error: 'The file name is empty.'};
   const ys = el.querySelector('.ysel');
   if (ys && !ys.value) return {error: 'Pick which year’s File Cabinet first.'};
-  return {action: 'approve', id: q.id, folderPath: path, name, remember: el.querySelector('.remember input').checked, year: ys ? +ys.value : undefined};
+  const b = {action: 'approve', id: q.id, folderPath: path, name, remember: el.querySelector('.remember input').checked, year: ys ? +ys.value : undefined};
+  /* The engine creates a missing "Bills Paid/<vendor>" folder only when the page says it is a new vendor folder Bo
+     chose (v1.10): the "New vendor folder under Bills Paid" option, or the card's own "New folder" suggestion.
+     A folder that was renamed or moved since the list loaded is refused instead of being made again. */
+  if (sel.value === '__new' || (q.newFolder && sel.value === (q.folderPath || ''))) b.newFolder = true;
+  return b;
 }
 async function act(el, body, okMsg){
-  el.classList.add('busy');
+  el.classList.add('busy'); BUSY++;
   try {
     let r = await api(body);
     if (!r.ok && r.dup && body.action === 'approve'){
-      if (!confirm(r.error)){ el.classList.remove('busy'); saveEdits(); await load(false); return; }
+      if (!confirm(r.error)){ el.classList.remove('busy'); return; }
       r = await api(Object.assign({}, body, {force: true}));
     }
-    if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); saveEdits(); await load(false); return; }
-    el.remove(); delete EDITS[body.id]; PICKED.delete(body.id);     // gone before anything saves its old state
-    toast(typeof okMsg === 'function' ? okMsg(r) : okMsg); saveEdits(); await load(false);
+    if (!r.ok){ el.classList.remove('busy'); toast(r.error || 'That didn’t work.', true); return; }
+    el.remove(); delete EDITS[body.id]; PICKED.delete(body.id); bump();     // gone before anything saves its old state
+    toast(typeof okMsg === 'function' ? okMsg(r) : okMsg);
   } catch (e) { el.classList.remove('busy'); if (e.message !== 'signed out') toast(e.unreadable ? e.message : 'Could not reach Scan Master: ' + e.message, true); }
+  finally { wrote(); BUSY--; saveEdits(); if (session()) scheduleRefresh(); }
 }
 
-/* ---------- previews (pdf.js) ---------- */
-const PDFS = {};
+/* ---------- previews (pdf.js) ----------
+   v1.10 (plan P4): at most 2 thumbnails load at a time, only for the list on screen (other lists load when their tab
+   opens), each card once, all through one shared pdf.js worker. A thumbnail that could not be made is not asked for
+   again for 10 minutes. Kept in memory only, never localStorage: bill images must not stay on a shared computer. */
+const PDFS = {}, THUMBS = {}, THUMB_FAIL = {}, THUMB_BUSY = {};   // id -> pdf bytes (promise) / image / retry-after time / loading now
+const THUMB_MAX = 2, LISTS = {review: '#reviewList', invoices: '#invoiceList', needs: '#needsList'};
+let THUMB_N = 0, PDFW = null;
+const isPhoto = q => flagsOf(q).includes('not-pdf');     // a Bill Pay invoice saved as a photo: pdf.js can't show it
 async function pdfData(id){
   if (!PDFS[id]) PDFS[id] = api({action: 'pdf', id}).then(r => { if (!r.ok) throw new Error(r.error); return Uint8Array.from(atob(r.data), c => c.charCodeAt(0)); })
     .catch(e => { delete PDFS[id]; throw e; });
   return PDFS[id];
 }
-const THUMBS = {};   // id -> image, so a refresh never re-renders (and never starts another pdf.js worker)
-async function thumb(q, box){
-  const put = url => { const ld = box.querySelector('.ld'); if (!ld) return; const im = new Image(); im.src = url; im.alt = ''; im.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover'; ld.replaceWith(im); };
-  if (THUMBS[q.id]) return put(THUMBS[q.id]);
-  let doc = null;
+function pdfWorker(){
+  if (PDFW && PDFW.destroyed) PDFW = null;
+  if (!PDFW && window.pdfjsLib && pdfjsLib.PDFWorker) try { PDFW = new pdfjsLib.PDFWorker({name: 'scan-master'}); } catch (e) { PDFW = null; }
+  return PDFW;
+}
+function openDoc(data){ const a = {data: data.slice()}, w = pdfWorker(); if (w) a.worker = w; return pdfjsLib.getDocument(a); }
+function endTask(t){ try { const p = t && t.destroy(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }   // also on failure, so no worker is left behind
+/** Show what is known about one card's thumbnail in every place that card is drawn. */
+function paintThumb(q, failed){
+  $$(`.bill[data-id="${CSS.escape(q.id)}"] .thumb .ld[data-t]`).forEach(ld => {
+    if (THUMBS[q.id]){ const im = new Image(); im.src = THUMBS[q.id]; im.alt = ''; im.style.cssText = 'display:block;width:100%;height:100%;object-fit:cover'; ld.replaceWith(im); return; }
+    const msg = isPhoto(q) ? 'Photo, open in Drive' : (failed || THUMB_FAIL[q.id] > Date.now()) ? 'No preview' : '';
+    if (msg){ ld.textContent = msg; ld.removeAttribute('data-t'); }
+  });
+}
+/** Start the next thumbnails for the list on screen, keeping at most THUMB_MAX loading. */
+function pumpThumbs(){
+  if (!S || !session() || !LISTS[VIEW] || pageHidden()) return;   // signed out: no more thumbnails until Bo signs in again
+  for (const ld of $$(LISTS[VIEW] + ' .thumb .ld[data-t]')){
+    if (THUMB_N >= THUMB_MAX) return;
+    if (!ld.isConnected || !ld.hasAttribute('data-t')) continue;
+    const id = ld.closest('.bill').dataset.id, q = S.queue.find(x => x.id === id);
+    if (!q || THUMB_BUSY[id]) continue;
+    if (THUMBS[id] || isPhoto(q) || THUMB_FAIL[id] > Date.now()){ paintThumb(q); continue; }
+    makeThumb(q);
+  }
+}
+async function makeThumb(q){
+  const id = q.id; let task = null, failed = false;
+  THUMB_BUSY[id] = true; THUMB_N++;
   try {
-    if (!window.pdfjsLib) throw new Error('viewer not loaded');
-    const data = await pdfData(q.id);
-    doc = await pdfjsLib.getDocument({data: data.slice()}).promise;
-    const pg = await doc.getPage(1), vp = pg.getViewport({scale: 1}), v2 = pg.getViewport({scale: 300 / vp.width});
+    if (!window.pdfjsLib){ const e = new Error('viewer not loaded'); e.passing = true; throw e; }
+    const data = await pdfData(id);
+    task = openDoc(data);
+    const doc = await task.promise, pg = await doc.getPage(1), vp = pg.getViewport({scale: 1}), v2 = pg.getViewport({scale: 300 / vp.width});
     const c = document.createElement('canvas'); c.width = v2.width; c.height = v2.height;
     await pg.render({canvasContext: c.getContext('2d'), viewport: v2}).promise;
-    THUMBS[q.id] = c.toDataURL('image/jpeg', 0.8); put(THUMBS[q.id]);
-  } catch (e) { const ld = box.querySelector('.ld'); if (ld) ld.textContent = 'No preview'; }
-  finally { if (doc) doc.destroy(); }
+    THUMBS[id] = c.toDataURL('image/jpeg', 0.8);
+  } catch (e) {
+    failed = true;
+    // A viewer that didn't load, a garbled Google answer, a dropped connection or a sign-out can clear up by itself: try again next refresh.
+    if (!(e.passing || e.unreadable || e.network || e.message === 'signed out')) THUMB_FAIL[id] = Date.now() + TIMING.failTtl;
+  } finally {
+    endTask(task); delete THUMB_BUSY[id]; THUMB_N--;
+    paintThumb(q, failed); pumpThumbs();
+  }
+}
+/** Forget pages and thumbnails of cards that are no longer in the queue (filed, removed...). */
+function pruneCaches(queue){
+  const live = new Set(queue.map(x => x.id));
+  [PDFS, THUMBS, THUMB_FAIL].forEach(m => Object.keys(m).forEach(k => { if (!live.has(k)) delete m[k]; }));
 }
 let PREVIEW_GEN = 0, PREVIEW_DOC = null;
 function closePreviewDoc(){ if (PREVIEW_DOC){ PREVIEW_DOC.destroy(); PREVIEW_DOC = null; } }
@@ -684,10 +830,14 @@ async function openPdf(q){
   const gen = ++PREVIEW_GEN, live = () => gen === PREVIEW_GEN && !$('#modal').hidden;
   $('#modal').hidden = false; $('#mT').textContent = q.scanName + ' · page(s) ' + q.pages; $('#mB').innerHTML = '<div style="color:var(--text-3)">Loading…</div>';
   $('#mOpen').onclick = () => window.open('https://drive.google.com/file/d/' + encodeURIComponent(q.stagedId) + '/view?authuser=sales@boshchemical.com', '_blank', 'noopener');
+  if (isPhoto(q)){ $('#mB').innerHTML = '<div class="err">This invoice is a photo, not a PDF, so it can not be shown here. Use Open in Drive.</div>'; return; }
+  let task = null, kept = false;
   try {
-    const data = await pdfData(q.id), doc = await pdfjsLib.getDocument({data: data.slice()}).promise;
-    if (!live()){ doc.destroy(); return; }
-    PREVIEW_DOC = doc;
+    if (!window.pdfjsLib) throw new Error('the page viewer did not load');
+    const data = await pdfData(q.id); task = openDoc(data);
+    const doc = await task.promise;
+    if (!live()){ endTask(task); return; }
+    PREVIEW_DOC = doc; kept = true;
     $('#mB').innerHTML = '';
     for (let i = 1; i <= doc.numPages; i++){
       const pg = await doc.getPage(i); if (!live()) return;
@@ -695,7 +845,10 @@ async function openPdf(q){
       c.width = v.width; c.height = v.height; $('#mB').appendChild(c);
       await pg.render({canvasContext: c.getContext('2d'), viewport: v}).promise;
     }
-  } catch (e) { if (live()) $('#mB').innerHTML = '<div class="err">Could not show the pages: ' + esc(e.message) + '. Use Open in Drive.</div>'; }
+  } catch (e) {
+    if (task && !kept) endTask(task);
+    if (live()) $('#mB').innerHTML = '<div class="err">Could not show the pages: ' + esc(e.message) + '. Use Open in Drive.</div>';
+  }
 }
 $('#mX').onclick = () => { PREVIEW_GEN++; closePreviewDoc(); $('#modal').hidden = true; $('#mB').innerHTML = ''; };
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#modal').hidden) $('#mX').click(); });
@@ -721,21 +874,24 @@ BULKS.forEach(B => {
 });
 async function runBulk(B){
   const els = $$(B.list + ' .pick:checked').map(c => c.closest('.bill'));
+  if (!els.length) return;
   const fails = []; let ok = 0;
-  $(B.go).disabled = true;
-  for (const el of els){
-    const q = S.queue.find(x => x.id === el.dataset.id), label = (q && q.vendor ? q.vendor + ' · ' : '') + el.querySelector('.fname').value;
-    const b = q ? buildApprove(el, q) : {error: 'no longer waiting'};
-    if (b.error){ fails.push(label + ': ' + b.error); continue; }
-    b.bulk = true;          // the engine refuses anything with a stop warning, even if this page let it through
-    el.classList.add('busy');
-    try { const r = await api(b); if (r.ok){ ok++; el.remove(); delete EDITS[b.id]; PICKED.delete(b.id); } else { fails.push(label + ': ' + (r.dup ? 'possible duplicate, check it on its card' : r.error)); el.classList.remove('busy'); } }
-    catch (e) { fails.push(label + ': ' + e.message); el.classList.remove('busy'); }
-  }
-  $(B.all).checked = false;
+  $(B.go).disabled = true; BUSY++;        // no refresh or automatic check while the bulk run is going
+  try {
+    for (const el of els){
+      const q = S.queue.find(x => x.id === el.dataset.id), label = (q && q.vendor ? q.vendor + ' · ' : '') + el.querySelector('.fname').value;
+      const b = q ? buildApprove(el, q) : {error: 'no longer waiting'};
+      if (b.error){ fails.push(label + ': ' + b.error); continue; }
+      b.bulk = true;          // the engine refuses anything with a stop warning, even if this page let it through
+      el.classList.add('busy');
+      try { const r = await api(b); if (r.ok){ ok++; el.remove(); delete EDITS[b.id]; PICKED.delete(b.id); } else { fails.push(label + ': ' + (r.dup ? 'possible duplicate, check it on its card' : r.error)); el.classList.remove('busy'); } }
+      catch (e) { fails.push(label + ': ' + e.message); el.classList.remove('busy'); if (e.message === 'signed out') break; }
+    }
+  } finally { wrote(); BUSY--; }
+  $(B.all).checked = false; bump();
   toast(ok + ' filed' + (fails.length ? ', ' + fails.length + ' not filed (see the red box)' : '') + '.', !!fails.length);
-  saveEdits(); await load(false);
-  if (fails.length) topErr('Not filed: ' + fails.join(' | '));
+  if (fails.length){ STICKY = {msg: 'Not filed: ' + fails.join(' | '), until: Date.now() + 60000}; topErr(STICKY.msg); }   // stays through the refresh below
+  saveEdits(); if (session()) scheduleRefresh();
 }
 
 /* ---------- log ---------- */
@@ -760,8 +916,12 @@ function drawLog(){
     const inp = cell.querySelector('input'); inp.focus(); inp.select();
     let done = false;
     const finish = async ok => { if (done) return; done = true; const v = inp.value.trim();
-      if (ok && v && v !== cur){ const res = await api({action: 'rename', fileId: r.fileId, name: v}).catch(e => ({ok: false, error: e.message}));
-        if (res.ok){ toast('Renamed in Drive.'); return load(false); } toast(res.error || 'Rename failed.', true); }
+      if (ok && v && v !== cur){
+        BUSY++; let res;
+        try { res = await api({action: 'rename', fileId: r.fileId, name: v}).catch(e => ({ok: false, error: e.message})); } finally { wrote(); BUSY--; }
+        if (res.ok){ toast('Renamed in Drive.'); if (S){ S.names = S.names || {}; S.names[r.fileId] = v + '.pdf'; } }   // shown now; the refresh brings the engine's exact name
+        else if (res.error !== 'signed out') toast(res.error || 'Rename failed.', true);
+        drawLog(); if (session()) scheduleRefresh(); return; }
       drawLog(); };
     inp.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
     inp.onblur = () => { if (inp.isConnected) finish(true); };
@@ -772,22 +932,50 @@ function drawRules(){
     : '<tr><td colspan="5" class="muted">None yet.</td></tr>';
 }
 
+/* Bo's button: always asks the engine to check now (now: true skips the engine's 5-minute automatic-check guard and
+   re-reads the folder list). Not while a change is being filed: the engine would only answer "busy". */
 $('#chkNow').onclick = async () => {
-  const b = $('#chkNow'); b.disabled = true;
-  try { const r = await api({action: 'check'}); toast(r.ok ? 'Checking Scan Dump. New scans appear in a minute or two.' : r.error, !r.ok); setTimeout(() => { if (canRefresh()) load(false); }, 60000); }
-  catch (e) { if (e.message !== 'signed out') toast('Could not reach Scan Master: ' + e.message, true); }
+  const b = $('#chkNow');
+  if (BUSY) return toast('Scan Master is busy filing; try Check now again in a moment.', true);
+  b.disabled = true;
+  try { const r = await api({action: 'check', now: true}); toast(r.ok ? 'Checking Scan Dump. New scans appear in a minute or two.' : (r.error || 'That didn’t work.'), !r.ok);
+    if (r.ok) setTimeout(() => { if (!LOADING && canRefresh()) load(); }, 60000); }
+  catch (e) { if (e.message !== 'signed out') toast(e.unreadable ? e.message : 'Could not reach Scan Master: ' + e.message, true); }
   b.disabled = false;
+};
+/* Inside the Command Center, go back to its Home view instead of opening a second Command Center inside this frame. */
+$('#toCC').onclick = () => {
+  if (SRC === 'frame'){ try { top.location.hash = 'home'; } catch (e) { top.location.href = 'https://bowilliams1.github.io/#home'; } return; }
+  location.href = 'https://bowilliams1.github.io/';
 };
 function tick(){ const d = new Date(); $('#clk').textContent = d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}); $('#clkD').textContent = d.toLocaleDateString([], {weekday: 'long', month: 'long', day: 'numeric'}); }
 tick(); setInterval(tick, 10000);
-/** Refresh unless Bo is typing in a card, renaming in the log, or looking at a preview. His edits are kept either way (EDITS). */
-function canRefresh(){
-  const a = document.activeElement;
-  return !!session() && $('#modal').hidden && !document.querySelector('.nm input') && !(a && a.closest && a.closest('.bill'));
+/** Refresh unless the page is off screen, a change is being filed, Bo is renaming in the log or looking at a preview,
+    or he is in a card (afterWrite: only while typing in one of its fields). His edits are kept either way (EDITS). */
+function canRefresh(afterWrite){
+  const a = document.activeElement, inCard = !!(a && a.closest && a.closest('.bill'));
+  const typing = inCard && (!afterWrite || (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== 'checkbox'));
+  return !!session() && !BUSY && !pageHidden() && $('#modal').hidden && !document.querySelector('.nm input') && !typing;
 }
-setInterval(() => { drawStatus(); if (canRefresh()) load(false); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && canRefresh()) load(true); });
-load(true);
+/* The minute poll asks only while on screen (plan P1). Coming back on screen (tab shown, or the Command Center
+   switching back to Scan Master) loads once if the cards are more than a minute old. Neither ever sends "check". */
+function pollTick(){ drawStatus(); if (!session()){ if (!pageHidden()) needSignIn(); return; } if (!LOADING && canRefresh()) load(); }
+let WAS_HIDDEN = false;
+function reshowTick(){
+  const h = pageHidden(), back = WAS_HIDDEN && !h; WAS_HIDDEN = h;
+  if (!back) return;
+  if (!session()){ needSignIn(); return; }
+  pumpThumbs();
+  if (!LOADING && Date.now() - LOADED_AT > TIMING.stale && canRefresh()) load();
+}
+const TIMERS = {};
+function stopTimers(){ clearInterval(TIMERS.poll); clearInterval(TIMERS.reshow); }
+function startTimers(){ stopTimers(); TIMERS.poll = setInterval(pollTick, TIMING.poll); TIMERS.reshow = setInterval(reshowTick, TIMING.reshow); }
+document.addEventListener('visibilitychange', reshowTick);
+startTimers();
+WAS_HIDDEN = pageHidden();
+showLoading();
+if (!session() || !WAS_HIDDEN) load();      // opened off screen: the first load waits until the page is shown
 </script>
 </body>
 </html>
