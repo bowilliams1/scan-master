@@ -450,7 +450,8 @@ $$('#nav button[data-v]').forEach(b => b.onclick = () => { VIEW = b.dataset.v; $
 
 const FLAG = { 'new-vendor': ['info', 'New vendor'], 'dup': ['crit', 'Possible duplicate'], 'check-folder': ['warn', 'Check folder'], 'no-folder': ['warn', 'No folder'],
   'y2027': ['info', 'Files in 2027'], 'wrong-year': ['crit', 'Not 2026/2027'], 'no-location': ['warn', 'Farm or Shop?'], 'not-bill': ['fyi', 'Not a bill'],
-  'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'], 'not-pdf': ['crit', 'Not a PDF'] };
+  'unsure': ['warn', 'Reader unsure'], 'check-name': ['warn', 'Check name'], 'no-date': ['warn', 'No date'], 'not-pdf': ['crit', 'Not a PDF'],
+  'bol-check': ['crit', 'Check BOL'], 'bol-unsigned-copy': ['info', 'Replaces unsigned copy'] };
 const flagsOf = q => String(q.flags || '').split(',').filter(Boolean);
 /* "Look twice" warnings may be bulk-approved (Bo, 2026-10-01). Everything else (duplicate, new folder, no folder,
    no date, other year, Farm-or-Shop, not a bill) is only ever approved on its own card; the engine enforces this too. */
@@ -564,6 +565,7 @@ function card(q){
     <div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>${esc(q.note)}</span></div>
     <div class="acts"><button class="obtn retry"><svg width="15" height="15"><use href="#i-refresh"/></svg>Try again</button><button class="obtn dismiss">Leave it, I’ll handle it</button><span class="ctrl-note">The scan is still in Scan Dump, untouched.</span></div></div></div>`;
   const fl = flagsOf(q), clean = !fl.length && q.status === 'waiting', dup = fl.includes('dup');
+  const isBol = q.docType === 'bill_of_lading';
   const soft = !clean && q.status === 'waiting' && fl.length > 0 && fl.every(f => SOFT.includes(f));
   const ask = ['check-folder', 'new-vendor', 'no-location', 'no-folder'].some(f => fl.includes(f));
   const chips = (q.location ? `<span class="chip ${q.location === 'Farm' ? 'good' : 'info'}">${esc(q.location)}</span>` : '') +
@@ -575,12 +577,16 @@ function card(q){
     <div class="bt">
       <div class="btop"><h3>${esc(q.vendor || 'Unknown vendor')}</h3>${chips}</div>
       <div class="facts">
-        <div class="fact"><div class="l">Service address</div><div class="v" title="${esc(q.address)}">${esc(q.address || '—')}${q.location ? ` <em>→ ${esc(q.location)}</em>` : ''}</div></div>
+        ${isBol ? `<div class="fact"><div class="l">BOL / Load #</div><div class="v">${esc(q.invoiceNo || '—')}</div></div>
+        <div class="fact"><div class="l">Pickup date</div><div class="v">${esc(niceDate(q.billDate) || '—')}</div></div>
+        <div class="fact"><div class="l">Drop-off</div><div class="v">${esc(String(q.address || '').replace(/^Drop-off /, '') || '—')}</div></div>`
+        : `<div class="fact"><div class="l">Service address</div><div class="v" title="${esc(q.address)}">${esc(q.address || '—')}${q.location ? ` <em>→ ${esc(q.location)}</em>` : ''}</div></div>
         <div class="fact"><div class="l">Bill date</div><div class="v">${esc(niceDate(q.billDate) || '—')}</div></div>
-        <div class="fact"><div class="l">Amount due</div><div class="v">${esc(money(q.amount) || '—')}</div></div>
+        <div class="fact"><div class="l">Amount due</div><div class="v">${esc(money(q.amount) || '—')}</div></div>`}
         <div class="fact paid"><div class="l">Written on it</div><div class="v" title="${esc(q.paidNote)}">${q.paidNote ? '“' + esc(q.paidNote) + '”' : '<span style="color:var(--text-3)">nothing</span>'}</div></div>
       </div>
       ${q.status === 'needs' && q.note ? `<div class="warnbox"><svg width="15" height="15"><use href="#i-flag"/></svg><span>${esc(q.note)}</span></div>` : ''}
+      ${q.status === 'waiting' && q.note && isBol ? `<div class="${fl.includes('bol-check') ? 'warnbox' : 'infobox'}"><svg width="15" height="15"><use href="#i-${fl.includes('bol-check') ? 'alert' : 'folder'}"/></svg><span>${esc(q.note)}</span></div>` : ''}
       ${dup ? `<div class="warnbox"><svg width="15" height="15"><use href="#i-alert"/></svg><span>This looks like something already filed (same name in that folder, or same vendor, date and amount). It stays here until you decide.</span></div>` : ''}
       ${q.newFolder ? `<div class="infobox"><svg width="15" height="15"><use href="#i-folder"/></svg><span>No folder for this vendor yet. Approving creates <b>Bills Paid › ${esc(q.newFolder)}</b>. Check the name first.</span></div>` : ''}
       <div class="edit">
@@ -591,7 +597,7 @@ function card(q){
             ${(+q.year === 2027 && !fl.includes('no-date')) ? '' : '<option value="" selected>— pick a year —</option>'}
             <option value="2026">File Cabinet 2026</option><option value="2027" ${(+q.year === 2027 && !fl.includes('no-date')) ? 'selected' : ''}>File Cabinet 2027</option></select></div>` : ''}</div>
         <div class="fld"><label>File name</label><div class="wrap"><input class="fname" value="${esc(q.name)}"><span class="ext">.pdf</span></div>
-          <div class="path">${q.invoiceNo ? 'Invoice ' + esc(q.invoiceNo) + ' · ' : ''}${q.last4 ? 'Account …' + esc(q.last4) : 'No account number shown'}</div></div>
+          <div class="path">${isBol ? 'Pickup date + Shipper Reference # (MM-DD-YYYY FBA…)' : (q.invoiceNo ? 'Invoice ' + esc(q.invoiceNo) + ' · ' : '') + (q.last4 ? 'Account …' + esc(q.last4) : 'No account number shown')}</div></div>
       </div>
       <div class="why"><svg width="15" height="15"><use href="#i-spark"/></svg><span>${esc(q.why || '')}</span></div>
       <label class="remember"><input type="checkbox"> Remember this: always file ${esc(q.vendor)}${q.last4 ? ' account …' + esc(q.last4) : ''}${q.location ? ' at the ' + esc(q.location) : ''} in the folder I picked.</label>
