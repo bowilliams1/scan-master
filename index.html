@@ -389,8 +389,21 @@ function toast(m, bad){ const e = $('#toast'); e.textContent = m; e.style.border
 function topErr(m){ const e = $('#topErr'); e.hidden = !m; e.querySelector('span').textContent = m || ''; }
 
 /* ---------- engine calls ---------- */
-function session(){ try { const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); return s && s.exp > Date.now() ? s : null; } catch (e) { return null; } }
-function setSession(r){ try { localStorage.setItem(SESSION_KEY, JSON.stringify({token: r.token, exp: r.exp})); } catch (e) {} }
+/* The pass also lives in memory, so a browser that won't keep saved site data (private window, privacy setting)
+   still works until the page is closed, and the sign-in box says why it came back (2026-10-02, "keeps signing out"). */
+let MEM = null;
+const OUT_KEY = 'bosh_sm_signout';   // why this browser was last signed out: {when, why}. Never the pass.
+function session(){ let s = null; try { s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch (e) {} s = s || MEM; return s && s.exp > Date.now() ? s : null; }
+function setSession(r){ MEM = {token: r.token, exp: r.exp}; try { localStorage.setItem(SESSION_KEY, JSON.stringify(MEM)); localStorage.removeItem(OUT_KEY); } catch (e) {} }
+function storageWorks(){ try { localStorage.setItem('bosh_sm_probe', '1'); const ok = localStorage.getItem('bosh_sm_probe') === '1'; localStorage.removeItem('bosh_sm_probe'); return ok; } catch (e) { return false; } }
+function dropSession(why){ MEM = null; try { localStorage.removeItem(SESSION_KEY); localStorage.setItem(OUT_KEY, JSON.stringify({when: Date.now(), why})); } catch (e) {} }
+const WHY = {'no-record': 'Scan Master didn’t recognise this browser’s sign-in', 'expired': 'Your 30-day sign-in ran out', 'password-changed': 'The Scan Master password was changed', 'missing': 'This browser sent no sign-in'};
+function signInReason(){
+  if (!storageWorks()) return 'This browser isn’t keeping saved site data (a private window or a privacy setting), so it can’t remember your sign-in.';
+  let o = null; try { o = JSON.parse(localStorage.getItem(OUT_KEY) || 'null'); } catch (e) {}
+  if (o && o.why) return (WHY[o.why] || 'Signed out (' + o.why + ')') + ' at ' + new Date(o.when).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) + '. Please sign in again.';
+  return '';
+}
 /* Google's web apps sometimes hand back an error page instead of the answer for a few minutes after a new
    version goes live (seen 2026-10-01). Reads are simply asked again once; clicks are never re-sent blind
    (the page refreshes instead, so Bo can see whether it went through). */
@@ -415,7 +428,11 @@ async function api1(body){
     const err = new Error('the engine sent an answer this page could not read (' + r.status + ' from ' + host + (peek ? ': ' + peek : '') + ')');
     err.unreadable = true; throw err;
   }
-  if (j.auth === false){ try { localStorage.removeItem(SESSION_KEY); } catch (e) {} showSignIn('Please sign in again.'); throw new Error('signed out'); }
+  if (j.auth === false){
+    // Never throw a pass away on one "no": ask once more (a refused request did nothing on the engine, so it is safe to resend).
+    if (!body.again && body.action !== 'login'){ await new Promise(r => setTimeout(r, 2000)); return api1(Object.assign({}, body, {again: true})); }
+    dropSession(j.why || 'refused'); showSignIn(signInReason() || 'Please sign in again.'); throw new Error('signed out');
+  }
   return j;
 }
 function showSignIn(msg){ $('#signin').hidden = false; $('#siErr').textContent = msg || ''; setTimeout(() => $('#siPw').focus(), 30); }
@@ -424,14 +441,15 @@ $('#siForm').addEventListener('submit', async e => {
   const btn = $('#siBtn'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#siErr').textContent = '';
   try {
     const r = await api({action: 'login', pw: $('#siPw').value});   // retried once inside api() if Google garbles the answer
-    if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true); }
+    if (r.ok){ setSession(r); $('#siPw').value = ''; $('#signin').hidden = true; load(true);
+      if (!storageWorks()) toast('Signed in, but this browser won’t remember it (private window or a privacy setting). You’ll be asked again next time.', true); }
     else $('#siErr').textContent = r.error || 'Sign-in didn’t work. Try again.';
   } catch (err) { $('#siErr').textContent = 'Could not reach Scan Master: ' + err.message; }
   btn.disabled = false; btn.textContent = 'Sign in';
 });
 
 async function load(checkToo){
-  if (!session()){ showSignIn(); return; }
+  if (!session()){ showSignIn(signInReason()); return; }
   try {
     if (checkToo) api({action: 'check'}).catch(() => {});
     const r = await api({action: 'state'});
